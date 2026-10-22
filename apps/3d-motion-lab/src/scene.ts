@@ -1,12 +1,13 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { keys, WIDTH, KEYBOARD_WIDTH, TRAVEL, evaluate } from './motion';
+import { keys, KEYBOARD_WIDTH, TRAVEL, evaluate, keyDepth } from './motion';
 import type { Note } from './motion';
 import { fingers, pointsForPose, restPose } from './fingers';
 import type { Hand } from './fingers';
 import { fitCamera } from './framing';
 import { WRIST, forearmEndpoints, FULL_VIEW_MIN, FULL_VIEW_MAX } from './movement';
 import type { MotionStyle } from './movement';
+import type { IdleFingerStyle, StrikeStyle } from './scale-motion';
 
 export function createScene(container: HTMLElement, detailContainer:HTMLElement) {
   const scene = new THREE.Scene();
@@ -32,8 +33,8 @@ export function createScene(container: HTMLElement, detailContainer:HTMLElement)
   const base = box(KEYBOARD_WIDTH+0.025,0.025,0.18,'#26394b');
   base.position.set(0,-0.03,-0.02); scene.add(base);
   const keyMeshes = keys.map(k => {
-    const mesh = box(k.black ? WIDTH*0.58 : WIDTH*0.96, k.black ? 0.024 : 0.018, k.black ? 0.087 : 0.15, k.black ? '#26303c' : '#edf1ee');
-    mesh.position.set(k.target[0], k.black ? 0 : -0.009, k.black ? -0.043 : -0.01);
+    const mesh = box(k.width,k.height,k.length,k.black ? '#26303c' : '#edf1ee');
+    mesh.position.set(k.target[0],k.target[1]-k.height/2,k.z);
     scene.add(mesh);
     return { mesh, restY: mesh.position.y, key:k };
   });
@@ -53,7 +54,7 @@ export function createScene(container: HTMLElement, detailContainer:HTMLElement)
       marker.renderOrder=10;group.add(marker);
       return {finger,segments,joints,marker};
     });
-    const targets=[0,1].map(()=>{
+    const targets=fingers.map(()=>{
       const target=new THREE.Mesh(new THREE.SphereGeometry(0.004,16,10),new THREE.MeshBasicMaterial({color:'#ffdc7b',wireframe:true,depthTest:false}));
       target.renderOrder=11;scene.add(target);return target;
     });
@@ -97,15 +98,15 @@ export function createScene(container: HTMLElement, detailContainer:HTMLElement)
   detailObserver.observe(detailContainer);
   return {
     view,
-    draw(notes:Note[],time:number,debug:boolean,manualAngles?:Record<Hand,number[]>,style:MotionStyle='smooth',showForearms=true) {
-      const frame = evaluate(manualAngles?[]:notes,time,style);
+    draw(notes:Note[],time:number,debug:boolean,manualAngles?:Record<Hand,number[]>,style:MotionStyle='smooth',showForearms=true,idleStyle:IdleFingerStyle='connected',strikeStyle:StrikeStyle='smooth',wristMotion=false) {
+      const frame = evaluate(manualAngles?[]:notes,time,style,idleStyle,strikeStyle,wristMotion);
       hands.forEach(({side,group,digits,targets,arm,forearm,elbow,wrist})=>{
         const pose=frame[side];
         group.rotation.set(...pose.rotation);
         const pivot=new THREE.Vector3(...WRIST);
         const offset=pivot.clone().sub(pivot.clone().applyQuaternion(group.quaternion));
         group.position.fromArray(pose.position).add(offset);
-        const endpoints=forearmEndpoints(pose.position,side);
+        const endpoints=forearmEndpoints(pose.position,side,pose.forearmGuide);
         const wristPosition=new THREE.Vector3(...endpoints.wrist),elbowPosition=new THREE.Vector3(...endpoints.elbow);
         const direction=elbowPosition.clone().sub(wristPosition);
         arm.visible=showForearms;
@@ -127,11 +128,11 @@ export function createScene(container: HTMLElement, detailContainer:HTMLElement)
         });
         targets.forEach((target,index)=>{
           const note=pose.activeNotes[index];target.visible=debug&&!!note;
-          if(note){target.position.fromArray(pose.targets[index]);target.position.y-=pose.depth*TRAVEL;}
+          if(note){target.position.fromArray(pose.targets[index]);target.position.y-=(pose.depths?.[index]??pose.depth)*TRAVEL;}
         });
       });
       keyMeshes.forEach(({mesh,restY,key}) => {
-        const depth=Math.max(...[frame.left,frame.right].map(p=>p.activeNotes.some(n=>n.midiNote===key.midiNote)?p.depth:0));
+        const depth=Math.max(keyDepth(frame.left,key.midiNote),keyDepth(frame.right,key.midiNote));
         mesh.position.y = restY-depth*TRAVEL;
         mesh.material.color.set(depth>0 ? '#5ed9c3' : key.black ? '#26303c' : '#edf1ee');
       });

@@ -9,7 +9,7 @@ export const specs = {
   4: { x:0.021, z:0.048, lengths:[0.04,0.03], spread:-0.04 },
   5: { x:0.039, z:0.055, lengths:[0.032,0.025], spread:-0.12 },
 };
-export type JointPose = { spread:number; proximal:number; distal:number };
+export type JointPose = { spread:number; proximal:number; distal:number; opposition?:number };
 export const spreadLimits = (finger:Finger):[number,number] => finger===1 ? [-0.4,0.4] : [-0.55,0.55];
 export function restPose(finger:Finger, spreadOffset=0):JointPose {
   return {spread:specs[finger].spread+spreadOffset,proximal:-0.15,distal:-0.1};
@@ -20,7 +20,9 @@ export function fingerPoints(hand:Hand, finger:Finger, curl:number): [Vec3,Vec3,
 }
 export function pointsForPose(hand:Hand, finger:Finger, pose:JointPose): [Vec3,Vec3,Vec3] {
   const spec=specs[finger], mirror=hand==='right'?1:-1;
-  const root:Vec3=[spec.x*mirror,0.028,spec.z];
+  // A small forward shift of the thumb base approximates opposition in the
+  // scale experiment. Other fingers and the original modes keep the same root.
+  const root:Vec3=[spec.x*mirror,0.028,spec.z-(finger===1?0.022*(pose.opposition??0):0)];
   const points:[Vec3,Vec3,Vec3]=[root,[...root],[...root]];
   const angles=[pose.proximal,pose.distal];
   for(let i=0;i<2;i++) {
@@ -34,12 +36,17 @@ export function pointsForPose(hand:Hand, finger:Finger, pose:JointPose): [Vec3,V
   return points;
 }
 // Closed-form geometry for this two-segment prototype, with explicit angle limits.
-export function solveFinger(hand:Hand,finger:Finger,target:Vec3):JointPose|undefined {
+export function solveFinger(hand:Hand,finger:Finger,target:Vec3,thumbUnder=false,oppositionOverride?:number):JointPose|undefined {
   const spec=specs[finger], root=pointsForPose(hand,finger,restPose(finger))[0];
-  const dx=(target[0]-root[0])*(hand==='right'?1:-1), dz=root[2]-target[2], down=root[1]-target[1];
+  const dx=(target[0]-root[0])*(hand==='right'?1:-1),down=root[1]-target[1];
+  const opposition=thumbUnder&&finger===1?(oppositionOverride??Math.max(0,Math.min(1,(root[2]-target[2]-Math.sqrt(Math.max(0,0.046**2-dx**2)))/0.022))):0;
+  root[2]-=0.022*opposition;
+  const dz=root[2]-target[2];
   if(dz<=0)return;
   const spread=Math.atan2(-dx,dz), offset=spread-spec.spread;
-  const [min,max]=spreadLimits(finger);
+  // Opposition for the scale experiment only. Manual splay and dyads keep their limits.
+  // This is a geometric thumb swing, not an anatomical joint model.
+  const [min,max]=thumbUnder&&finger===1 ? [-1.9,0.4] : spreadLimits(finger);
   if(offset<min||offset>max)return;
   const radial=Math.hypot(dx,dz),[a,b]=spec.lengths;
   const cosine=(radial*radial+down*down-a*a-b*b)/(2*a*b);
@@ -48,7 +55,7 @@ export function solveFinger(hand:Hand,finger:Finger,target:Vec3):JointPose|undef
   const proximal=Math.atan2(down,radial)-Math.atan2(b*Math.sin(joint),a+b*Math.cos(joint));
   const distal=proximal+joint;
   if(proximal< -0.7||proximal>1.1||joint>1.7||distal>1.8)return;
-  return {spread,proximal,distal};
+  return {...(thumbUnder&&finger===1?{opposition}:{}),spread,proximal,distal};
 }
 export function curlForDrop(hand:Hand, finger:Finger, drop:number) {
   const restY=fingerPoints(hand,finger,0)[2][1];

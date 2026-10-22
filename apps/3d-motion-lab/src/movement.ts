@@ -1,5 +1,6 @@
 import type { Vec3, Hand } from './fingers';
-export type MotionStyle='linear'|'smooth';
+export type TravelStyle='linear'|'smooth';
+export type MotionStyle=TravelStyle|'scale';
 export const WRIST:Vec3=[0,0.028,0.1025];
 export const FOREARM_LENGTH=0.245;
 export const FULL_VIEW_MIN:Vec3=[-52*0.0235/2-0.18,-0.15,-0.13];
@@ -7,7 +8,7 @@ export const FULL_VIEW_MAX:Vec3=[52*0.0235/2+0.18,0.17,0.50];
 export const clamp01=(v:number)=>Math.max(0,Math.min(1,v));
 export const ease=(v:number)=>{const t=clamp01(v);return t*t*t*(t*(t*6-15)+10);};
 
-export function transition(from:Vec3,to:Vec3,time:number,start:number,end:number,style:MotionStyle) {
+export function transition(from:Vec3,to:Vec3,time:number,start:number,end:number,style:TravelStyle) {
   const distance=Math.hypot(to[0]-from[0],to[2]-from[2]);
   const available=Math.max(1e-9,end-start);
   const duration=style==='smooth'?Math.min(available,Math.max(0.3,0.22+distance/0.7)):Math.min(0.3,available);
@@ -31,10 +32,17 @@ export function handPointWorld(position:Vec3,rotation:Vec3,point:Vec3):Vec3 {
   const rx=x*cz-y*sz,ry=x*sz+y*cz;
   return [position[0]+WRIST[0]+rx,position[1]+WRIST[1]+ry*cx-z*sx,position[2]+WRIST[2]+ry*sx+z*cx];
 }
-export function forearmEndpoints(position:Vec3,hand:Hand) {
+export function handPointLocal(position:Vec3,rotation:Vec3,point:Vec3):Vec3 {
+  const [x,y,z]=point.map((v,i)=>v-position[i]-WRIST[i]);
+  const cx=Math.cos(rotation[0]),sx=Math.sin(rotation[0]);
+  const cz=Math.cos(rotation[2]),sz=Math.sin(rotation[2]);
+  const ry=y*cx+z*sx,rz=-y*sx+z*cx;
+  return [WRIST[0]+x*cz+ry*sz,WRIST[1]-x*sz+ry*cz,WRIST[2]+rz];
+}
+export function forearmEndpoints(position:Vec3,hand:Hand,guide:Vec3=[0,0,0]) {
   const wrist=position.map((v,i)=>v+WRIST[i]) as Vec3;
   // The elbow follows the wrist toward a body-side guide; the upper arm is not modeled.
-  const toward:Vec3=[(hand==='left'?-0.15:0.15)-wrist[0],-0.07-wrist[1],0.30];
+  const toward:Vec3=[(hand==='left'?-0.15:0.15)-wrist[0]+guide[0],-0.07-wrist[1]+guide[1],0.30+guide[2]];
   const distance=Math.hypot(...toward);
   const elbow=wrist.map((v,i)=>v+toward[i]/distance*FOREARM_LENGTH) as Vec3;
   return {wrist,elbow};
