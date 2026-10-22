@@ -1,0 +1,12 @@
+[
+  {"time":1,"duration":3,"midiNote":48,"hand":"left","finger":5},
+  {"time":1,"duration":0.5,"midiNote":60,"hand":"right","finger":2},
+  {"time":2.2,"duration":0.5,"midiNote":61,"hand":"right","finger":3},
+  {"time":3.4,"duration":0.5,"midiNote":64,"hand":"right","finger":1},
+  {"time":4.6,"duration":0.5,"midiNote":50,"hand":"left","finger":4},
+  {"time":4.6,"duration":0.5,"midiNote":66,"hand":"right","finger":4},
+  {"time":5.8,"duration":0.5,"midiNote":49,"hand":"left","finger":3},
+  {"time":5.8,"duration":0.5,"midiNote":67,"hand":"right","finger":5},
+  {"time":7,"duration":0.5,"midiNote":53,"hand":"left","finger":2},
+  {"time":8.2,"duration":0.5,"midiNote":55,"hand":"left","finger":1}
+]

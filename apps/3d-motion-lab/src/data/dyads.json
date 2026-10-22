@@ -1,0 +1,14 @@
+[
+  {"time":1,"duration":0.8,"midiNote":60,"hand":"right","finger":2},
+  {"time":1,"duration":0.8,"midiNote":64,"hand":"right","finger":4},
+  {"time":2.6,"duration":0.8,"midiNote":62,"hand":"right","finger":2},
+  {"time":2.6,"duration":0.8,"midiNote":67,"hand":"right","finger":4},
+  {"time":4.2,"duration":0.8,"midiNote":48,"hand":"left","finger":4},
+  {"time":4.2,"duration":0.8,"midiNote":52,"hand":"left","finger":2},
+  {"time":4.2,"duration":0.8,"midiNote":64,"hand":"right","finger":2},
+  {"time":4.2,"duration":0.8,"midiNote":69,"hand":"right","finger":4},
+  {"time":5.8,"duration":0.8,"midiNote":60,"hand":"right","finger":1},
+  {"time":5.8,"duration":0.8,"midiNote":67,"hand":"right","finger":5},
+  {"time":5.8,"duration":0.8,"midiNote":48,"hand":"left","finger":5},
+  {"time":5.8,"duration":0.8,"midiNote":55,"hand":"left","finger":1}
+]
