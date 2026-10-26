@@ -2,7 +2,7 @@
   import { onDestroy } from 'svelte';
   import type { ScoreProject } from '../model/project';
   import type { OutlineCursor } from '../state/outline-cursor';
-  import { isTimelinePlacementInvalid, type TimelineCursor } from '../state/timeline-cursor';
+  import { getDiatonicPitchClasses, isTimelinePlacementInvalid, type TimelineCursor } from '../state/timeline-cursor';
 
   let { outline, cursor, timelineCursor, mode }: {
     outline: ScoreProject['outline'];
@@ -69,9 +69,6 @@
   });
 
   const pitchClassNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
-  const naturalPitchClasses = [0, 2, 4, 5, 7, 9, 11];
-  const sharpOrder = [3, 0, 4, 1, 5, 2, 6];
-  const flatOrder = [6, 2, 5, 1, 4, 0, 3];
   const pixelsPerQuarter = 120;
   const pixelsPerWhole = pixelsPerQuarter * 4;
   const pixelsPerSixteenth = pixelsPerWhole / 16;
@@ -189,16 +186,7 @@
     animateTimelineVerticalScroll(rollTop, pitchTop);
   });
   const pitches = $derived.by(() => {
-    const fifths = outline[0].data.keySignature.fifths;
-    const alteredSteps = fifths >= 0
-      ? new Set(sharpOrder.slice(0, fifths))
-      : new Set(flatOrder.slice(0, -fifths));
-    const diatonicPitchClasses = new Set(
-      naturalPitchClasses.map((pitchClass, step) => {
-        const alteration = alteredSteps.has(step) ? Math.sign(fifths) : 0;
-        return (pitchClass + alteration + 12) % 12;
-      }),
-    );
+    const diatonicPitchClasses = getDiatonicPitchClasses(outline[0].data.keySignature);
 
     return Array.from({ length: 88 }, (_, index) => {
       const midi = 108 - index;
@@ -334,13 +322,14 @@
                 aria-hidden="true"
               ></div>
             {/if}
-            {#each note.pitches as pitch (`${note.id}-${pitch.midi}`)}
+            {#each note.pitches as pitch, pitchIndex (`${note.id}-${pitch.midi}`)}
               <div
                 class="score-note-pitch"
                 class:diatonic={isDiatonicMidi(pitch.midi)}
                 class:chromatic={!isDiatonicMidi(pitch.midi)}
+                class:unselected={mode === 'timeline' && timelineCursor.focusedNoteId === note.id && timelineCursor.focusedPitchIndex !== pitchIndex}
                 aria-label={`Note ${note.id}`}
-                aria-current={mode === 'timeline' && timelineCursor.focusedNoteId === note.id ? 'true' : undefined}
+                aria-current={mode === 'timeline' && timelineCursor.focusedNoteId === note.id && timelineCursor.focusedPitchIndex === pitchIndex ? 'true' : undefined}
                 style={`left: ${note.positionSixteenths * pixelsPerSixteenth}px; top: ${pitchTopMargin + (108 - pitch.midi) * pitchRowHeight}px; width: ${(note.duration.cnt / note.duration.unit) * pixelsPerWhole}px`}
               ></div>
             {/each}
@@ -618,6 +607,10 @@
   .score-note-pitch.diatonic {
     border: 1px solid #256b32;
     background: linear-gradient(#85ec84, #32bd47);
+  }
+
+  .score-note-pitch.unselected {
+    opacity: 0.35;
   }
 
   .score-note-pitch.chromatic {

@@ -2,6 +2,7 @@
   import OutlinePanel from './components/OutlinePanel.svelte';
   import TimelinePanel from './components/TimelinePanel.svelte';
   import { createProject, type ScoreProject } from './model/project';
+  import { createKeyHold } from './state/key-hold.svelte';
   import {
     createTimelineCursor,
     addTimelineNoteAt,
@@ -16,6 +17,10 @@
     moveTimelineCursorPitch,
     moveFocusedTimelineNotePitch,
     setTimelineOperationUnit,
+    addFocusedNotePitch,
+    selectFocusedNotePitch,
+    deleteFocusedTimelineNote,
+    focusAdjacentTimelineNote,
   } from './state/timeline-cursor';
   import {
     addMeasureAfterCursor,
@@ -30,6 +35,7 @@
   let outlineCursor = $state(createOutlineCursor(initialProject.outline));
   let timelineCursor = $state(createTimelineCursor());
   let mode = $state<'outline' | 'timeline'>('outline');
+  const keyHold = createKeyHold();
 
   const pitchClassNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 
@@ -42,10 +48,23 @@
     if (block && block.id !== outlineCursor.blockId) outlineCursor = { blockId: block.id };
   }
 
+  function movePitch(direction: -1 | 1, diatonic = false) {
+    const keySignature = diatonic ? project.outline[0].data.keySignature : undefined;
+    if (timelineCursor.focusedNoteId === null) {
+      timelineCursor = moveTimelineCursorPitch(timelineCursor, direction, keySignature);
+    } else {
+      const result = moveFocusedTimelineNotePitch(project, timelineCursor, direction, keySignature);
+      if (result) {
+        project = result.project;
+        timelineCursor = result.cursor;
+      }
+    }
+  }
+
   function handleKeydown(event: KeyboardEvent) {
     if (
       event.defaultPrevented || event.isComposing ||
-      event.altKey || event.ctrlKey || event.metaKey || event.shiftKey
+      event.altKey || event.ctrlKey || event.metaKey
     ) return;
     const isToggleModeKey = event.key.toLowerCase() === 'r';
     const isMoveKey = event.key === 'ArrowUp' || event.key === 'ArrowDown';
@@ -53,7 +72,8 @@
     const isAddMeasureKey = event.key.toLowerCase() === 'a';
     const isAddSectionKey = event.key.toLowerCase() === 's';
     const isOperationRateKey = mode === 'timeline' && ['1', '2', '3'].includes(event.key);
-    if (!isToggleModeKey && !isMoveKey && !isMoveSectionKey && !isAddMeasureKey && !isAddSectionKey && !isOperationRateKey) return;
+    const isDeleteKey = mode === 'timeline' && event.key === 'Delete';
+    if (!isToggleModeKey && !isMoveKey && !isMoveSectionKey && !isAddMeasureKey && !isAddSectionKey && !isOperationRateKey && !isDeleteKey) return;
 
     const target = event.target;
     if (target instanceof HTMLElement && (
@@ -61,10 +81,56 @@
     )) return;
 
     event.preventDefault();
+    // Shift retains pitch-selection priority; C alone only enables pitch movement.
+    if (keyHold.diatonicMovement && !keyHold.pitchSelection && !event.shiftKey) {
+      if (mode === 'timeline' && isMoveKey) movePitch(event.key === 'ArrowUp' ? 1 : -1, true);
+      return;
+    }
+    if (keyHold.noteNavigation && !keyHold.pitchSelection && !event.shiftKey) {
+      if (mode === 'timeline' && isMoveSectionKey) {
+        timelineCursor = focusAdjacentTimelineNote(
+          project.outline, timelineCursor, event.key === 'ArrowLeft' ? -1 : 1,
+        );
+        syncOutlineToTimelinePosition(timelineCursor.positionSixteenths);
+      }
+      return;
+    }
+    if (isDeleteKey) {
+      const result = deleteFocusedTimelineNote(project, timelineCursor, keyHold.pitchSelection || event.shiftKey);
+      if (result) {
+        project = result.project;
+        timelineCursor = result.cursor;
+        syncOutlineToTimelinePosition(timelineCursor.positionSixteenths);
+      }
+      return;
+    }
+    if (keyHold.pitchSelection || event.shiftKey) {
+      if (mode !== 'timeline' || timelineCursor.focusedNoteId === null) return;
+      if (isAddMeasureKey) {
+        const result = addFocusedNotePitch(project, timelineCursor);
+        if (result) {
+          project = result.project;
+          timelineCursor = result.cursor;
+        }
+      } else if (isMoveKey) {
+        timelineCursor = selectFocusedNotePitch(
+          project, timelineCursor, event.key === 'ArrowUp' ? 1 : -1,
+        );
+      }
+      return;
+    }
     if (isToggleModeKey) {
       if (mode === 'outline') {
         const positionSixteenths = getOutlinePositionSixteenths(project.outline, outlineCursor.blockId);
-        timelineCursor = { ...timelineCursor, positionSixteenths };
+        const meter = project.outline[0].data.timeSignature;
+        const isCompoundMeter = meter.unit === 8 && meter.cnt >= 6 && meter.cnt % 3 === 0;
+        timelineCursor = {
+          ...timelineCursor,
+          positionSixteenths,
+          operationUnit: { cnt: isCompoundMeter ? 3 : 1, unit: meter.unit },
+          focusedNoteId: null,
+          focusedPitchIndex: null,
+        };
         const block = getOutlineBlockAtPosition(project.outline, positionSixteenths);
         if (block) outlineCursor = { blockId: block.id };
         mode = 'timeline';
@@ -83,7 +149,7 @@
           ? focusedNote.measureStartSixteenths + focusedNote.note.positionSixteenths +
             getOperationStepSixteenths(focusedNote.note.duration)
           : timelineCursor.positionSixteenths;
-        const notePitch = focusedNote?.note.pitches[0]?.midi ?? timelineCursor.pitch;
+        const notePitch = timelineCursor.pitch;
         const result = addTimelineNoteAt(project, timelineCursor, noteEndPosition, notePitch);
         if (result) {
           project = result.project;
@@ -112,6 +178,7 @@
             positionSixteenths: targetPosition,
             operationUnit: noteOperationUnit ?? timelineCursor.operationUnit,
             focusedNoteId: null,
+            focusedPitchIndex: null,
           };
           syncOutlineToTimelinePosition(targetPosition);
         } else {
@@ -123,6 +190,7 @@
               pitch: collidedNote.note.pitches[0]?.midi ?? timelineCursor.pitch,
               operationUnit: noteOperationUnit ?? timelineCursor.operationUnit,
               focusedNoteId: collidedNote.note.id,
+              focusedPitchIndex: 0,
             };
             syncOutlineToTimelinePosition(collidedNote.measureStartSixteenths);
           } else {
@@ -136,18 +204,7 @@
         }
       } else if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
         const direction = event.key === 'ArrowUp' ? 1 : -1;
-        if (timelineCursor.focusedNoteId === null) {
-          timelineCursor = moveTimelineCursorPitch(
-            timelineCursor,
-            direction,
-          );
-        } else {
-          const result = moveFocusedTimelineNotePitch(project, timelineCursor, direction);
-          if (result) {
-            project = result.project;
-            timelineCursor = result.cursor;
-          }
-        }
+        movePitch(direction);
       }
       return;
     }

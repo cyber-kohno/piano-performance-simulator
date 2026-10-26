@@ -32,6 +32,7 @@ export type PianoNote = {
   positionSixteenths: number;
   duration: NoteDuration;
   /** A chord is represented by multiple pitches with shared onset and duration. */
+  /** Unique MIDI pitches, always ordered from highest to lowest. */
   pitches: PianoPitch[];
 };
 

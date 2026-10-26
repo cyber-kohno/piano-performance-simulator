@@ -1,4 +1,5 @@
 import type {
+  KeySignature,
   MeasureBlock,
   NoteDuration,
   OutlineBlock,
@@ -11,9 +12,32 @@ export const TIMELINE_OPERATION_UNITS = [
   { key: '2', value: { cnt: 1, unit: 8 }, stepSixteenths: 2 },
   { key: '3', value: { cnt: 1, unit: 4 }, stepSixteenths: 4 },
 ] as const;
-export type TimelineOperationUnit = (typeof TIMELINE_OPERATION_UNITS)[number]['value'];
+export type TimelineOperationUnit = NoteDuration;
 export const MIN_PIANO_PITCH = 21; // A0
 export const MAX_PIANO_PITCH = 108; // C8
+
+export function getDiatonicPitchClasses(keySignature: KeySignature): Set<number> {
+  const naturalPitchClasses = [0, 2, 4, 5, 7, 9, 11];
+  const fifths = keySignature.fifths;
+  const alterationOrder = fifths >= 0 ? [3, 0, 4, 1, 5, 2, 6] : [6, 2, 5, 1, 4, 0, 3];
+  const altered = new Set(alterationOrder.slice(0, Math.abs(fifths)));
+  return new Set(naturalPitchClasses.map((pitch, step) =>
+    (pitch + (altered.has(step) ? Math.sign(fifths) : 0) + 12) % 12,
+  ));
+}
+
+function findNextPitch(
+  pitch: number,
+  direction: -1 | 1,
+  keySignature?: KeySignature,
+  occupied: ReadonlySet<number> = new Set(),
+): number | undefined {
+  const allowed = keySignature ? getDiatonicPitchClasses(keySignature) : undefined;
+  for (let midi = pitch + direction; midi >= MIN_PIANO_PITCH && midi <= MAX_PIANO_PITCH; midi += direction) {
+    if (!occupied.has(midi) && (!allowed || allowed.has(midi % 12))) return midi;
+  }
+  return undefined;
+}
 
 export type TimelineCursor = {
   /** Horizontal position measured in sixteenth-note steps from the score start. */
@@ -24,6 +48,8 @@ export type TimelineCursor = {
   operationUnit: TimelineOperationUnit;
   /** Selected note ID; null means the cursor is in note-entry mode. */
   focusedNoteId: string | null;
+  /** Index in the focused note's descending pitch array. */
+  focusedPitchIndex: number | null;
 };
 
 export type LocatedTimelineNote = {
@@ -38,6 +64,7 @@ export function createTimelineCursor(): TimelineCursor {
     pitch: 60,
     operationUnit: TIMELINE_OPERATION_UNITS[0].value,
     focusedNoteId: null,
+    focusedPitchIndex: null,
   }; // C4, 1/16 operation unit
 }
 
@@ -95,6 +122,38 @@ export function getOperationStepSixteenths(unit: NoteDuration): number {
   return 16 * unit.cnt / unit.unit;
 }
 
+export function focusAdjacentTimelineNote(
+  outline: readonly OutlineBlock[],
+  cursor: TimelineCursor,
+  direction: -1 | 1,
+): TimelineCursor {
+  const onset = (located: LocatedTimelineNote) => located.measureStartSixteenths + located.note.positionSixteenths;
+  const notes = getLocatedTimelineNotes(outline)
+    .filter(({ note }) => note.pitches.length > 0)
+    .sort((a, b) => onset(a) - onset(b));
+  let target: LocatedTimelineNote | undefined;
+  if (cursor.focusedNoteId !== null) {
+    const index = notes.findIndex(({ note }) => note.id === cursor.focusedNoteId);
+    if (index === -1) return cursor;
+    target = notes[index + direction];
+  } else {
+    // Match Scorehack: a note containing the cursor is reachable from either side.
+    const ordered = direction === -1 ? [...notes].reverse() : notes;
+    target = ordered.find((located) => direction === -1
+      ? cursor.positionSixteenths > onset(located)
+      : cursor.positionSixteenths < onset(located) + getOperationStepSixteenths(located.note.duration));
+  }
+  if (!target) return cursor;
+  return {
+    ...cursor,
+    positionSixteenths: onset(target),
+    pitch: target.note.pitches[0].midi,
+    focusedNoteId: target.note.id,
+    focusedPitchIndex: 0,
+    operationUnit: getOperationUnitForDuration(target.note.duration) ?? cursor.operationUnit,
+  };
+}
+
 export function getOperationUnitForDuration(duration: NoteDuration): TimelineOperationUnit | undefined {
   return TIMELINE_OPERATION_UNITS.find(({ value }) =>
     value.cnt === duration.cnt && value.unit === duration.unit
@@ -148,7 +207,7 @@ export function moveTimelineCursorHorizontally(
   const positionSixteenths = cursor.positionSixteenths + direction * step;
   const totalSteps = getTimelineLengthSixteenths(outline);
   if (positionSixteenths < 0 || positionSixteenths + step > totalSteps + 1e-8) return cursor;
-  return { ...cursor, positionSixteenths, focusedNoteId: null };
+  return { ...cursor, positionSixteenths, focusedNoteId: null, focusedPitchIndex: null };
 }
 
 export function setTimelineOperationUnit(
@@ -156,7 +215,10 @@ export function setTimelineOperationUnit(
   key: string,
 ): TimelineCursor {
   const selected = TIMELINE_OPERATION_UNITS.find((rate) => rate.key === key);
-  if (!selected || selected.value.unit === cursor.operationUnit.unit) return cursor;
+  if (!selected || (
+    selected.value.cnt === cursor.operationUnit.cnt &&
+    selected.value.unit === cursor.operationUnit.unit
+  )) return cursor;
 
   return {
     ...cursor,
@@ -249,6 +311,7 @@ export function addTimelineNoteAt(
       positionSixteenths,
       pitch,
       focusedNoteId: nextNote.id,
+      focusedPitchIndex: 0,
     },
   };
 }
@@ -263,30 +326,28 @@ function createNextNoteId(outline: readonly OutlineBlock[]): string {
 export function moveTimelineCursorPitch(
   cursor: TimelineCursor,
   direction: -1 | 1,
+  keySignature?: KeySignature,
 ): TimelineCursor {
-  const pitch = Math.max(MIN_PIANO_PITCH, Math.min(MAX_PIANO_PITCH, cursor.pitch + direction));
-  return pitch === cursor.pitch ? cursor : { ...cursor, pitch };
+  const pitch = findNextPitch(cursor.pitch, direction, keySignature);
+  return pitch === undefined ? cursor : { ...cursor, pitch };
 }
 
 export function moveFocusedTimelineNotePitch(
   project: ScoreProject,
   cursor: TimelineCursor,
   direction: -1 | 1,
+  keySignature?: KeySignature,
 ): { project: ScoreProject; cursor: TimelineCursor } | undefined {
   if (cursor.focusedNoteId === null) return undefined;
   const located = getLocatedTimelineNote(project.outline, cursor.focusedNoteId);
   if (!located || located.note.pitches.length === 0) return undefined;
 
-  const selectedPitchIndex = Math.max(
-    0,
-    located.note.pitches.findIndex((pitch) => pitch.midi === cursor.pitch),
-  );
+  const selectedPitchIndex = cursor.focusedPitchIndex;
+  if (selectedPitchIndex === null || !located.note.pitches[selectedPitchIndex]) return undefined;
   const selectedPitch = located.note.pitches[selectedPitchIndex];
-  const nextMidi = Math.max(
-    MIN_PIANO_PITCH,
-    Math.min(MAX_PIANO_PITCH, selectedPitch.midi + direction),
-  );
-  if (nextMidi === selectedPitch.midi) return undefined;
+  const occupied = new Set(located.note.pitches.map((pitch) => pitch.midi));
+  const nextMidi = findNextPitch(selectedPitch.midi, direction, keySignature, occupied);
+  if (nextMidi === undefined) return undefined;
 
   const outline = project.outline.map((block) => {
     if (block.id !== located.measure.id || block.type !== 'measure') return block;
@@ -299,7 +360,7 @@ export function moveFocusedTimelineNotePitch(
                   ...note,
                   pitches: note.pitches.map((pitch, pitchIndex) =>
                     pitchIndex === selectedPitchIndex ? { ...pitch, midi: nextMidi } : pitch,
-                  ),
+                  ).sort((a, b) => b.midi - a.midi),
                 }
               : note),
           }
@@ -313,6 +374,103 @@ export function moveFocusedTimelineNotePitch(
 
   return {
     project: { ...project, outline },
-    cursor: { ...cursor, pitch: nextMidi },
+    cursor: {
+      ...cursor,
+      pitch: nextMidi,
+      focusedPitchIndex: located.note.pitches.filter((pitch, index) =>
+        index !== selectedPitchIndex && pitch.midi > nextMidi,
+      ).length,
+    },
+  };
+}
+
+export function selectFocusedNotePitch(
+  project: ScoreProject,
+  cursor: TimelineCursor,
+  direction: -1 | 1,
+): TimelineCursor {
+  if (cursor.focusedNoteId === null || cursor.focusedPitchIndex === null) return cursor;
+  const located = getLocatedTimelineNote(project.outline, cursor.focusedNoteId);
+  const index = cursor.focusedPitchIndex - direction;
+  const pitch = located?.note.pitches[index];
+  return pitch ? { ...cursor, focusedPitchIndex: index, pitch: pitch.midi } : cursor;
+}
+
+export function addFocusedNotePitch(
+  project: ScoreProject,
+  cursor: TimelineCursor,
+): { project: ScoreProject; cursor: TimelineCursor } | undefined {
+  if (cursor.focusedNoteId === null || cursor.focusedPitchIndex === null) return undefined;
+  const located = getLocatedTimelineNote(project.outline, cursor.focusedNoteId);
+  const selected = located?.note.pitches[cursor.focusedPitchIndex];
+  if (!located || !selected) return undefined;
+  const midi = selected.midi - 1;
+  if (midi < MIN_PIANO_PITCH || located.note.pitches.some((pitch) => pitch.midi === midi)) return undefined;
+  const pitches = [...located.note.pitches, { midi }].sort((a, b) => b.midi - a.midi);
+  const outline = project.outline.map((block) => {
+    if (block.type !== 'measure' || block.id !== located.measure.id) return block;
+    return {
+      ...block,
+      data: {
+        ...block.data,
+        upperStaff: {
+          ...block.data.upperStaff,
+          voices: block.data.upperStaff.voices.map((voice, index) => index !== 0 ? voice : {
+            ...voice,
+            notes: voice.notes.map((note) => note.id === located.note.id ? { ...note, pitches } : note),
+          }),
+        },
+      },
+    };
+  }) as ScoreProject['outline'];
+  return {
+    project: { ...project, outline },
+    cursor: { ...cursor, pitch: midi, focusedPitchIndex: pitches.findIndex((pitch) => pitch.midi === midi) },
+  };
+}
+
+export function deleteFocusedTimelineNote(
+  project: ScoreProject,
+  cursor: TimelineCursor,
+  pitchOnly = false,
+): { project: ScoreProject; cursor: TimelineCursor } | undefined {
+  if (cursor.focusedNoteId === null) return undefined;
+  const located = getLocatedTimelineNote(project.outline, cursor.focusedNoteId);
+  if (!located) return undefined;
+  const index = cursor.focusedPitchIndex;
+  if (pitchOnly && (index === null || !located.note.pitches[index])) return undefined;
+  const pitches = pitchOnly
+    ? located.note.pitches.filter((_, pitchIndex) => pitchIndex !== index)
+    : [];
+  const outline = project.outline.map((block) => {
+    if (block.type !== 'measure' || block.id !== located.measure.id) return block;
+    return {
+      ...block,
+      data: {
+        ...block.data,
+        upperStaff: {
+          ...block.data.upperStaff,
+          voices: block.data.upperStaff.voices.map((voice, voiceIndex) => voiceIndex !== 0 ? voice : {
+            ...voice,
+            notes: pitches.length === 0
+              ? voice.notes.filter((note) => note.id !== located.note.id)
+              : voice.notes.map((note) => note.id === located.note.id ? { ...note, pitches } : note),
+          }),
+        },
+      },
+    };
+  }) as ScoreProject['outline'];
+  // Prefer the next lower pitch, or the last remaining pitch when deleting the lowest.
+  const nextIndex = Math.min(index ?? 0, pitches.length - 1);
+  return {
+    project: { ...project, outline },
+    cursor: pitches.length > 0
+      ? { ...cursor, focusedPitchIndex: nextIndex, pitch: pitches[nextIndex].midi }
+      : {
+          ...cursor,
+          positionSixteenths: located.measureStartSixteenths + located.note.positionSixteenths,
+          focusedNoteId: null,
+          focusedPitchIndex: null,
+        },
   };
 }
