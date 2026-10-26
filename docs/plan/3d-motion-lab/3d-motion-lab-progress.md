@@ -1,5 +1,7 @@
 # 3D検証アプリ 作業記録
 
+2026-10-27追記：本資料は3D検証内の状態・履歴です。別のapps/editorでは、[休符込みの記譜列による譜面編集の基盤](../score-domain-model/score-domain-model.md)を実装済みです。秒／拍JSONは動作検証用であり、エディタの保存モデルとは区別します。両アプリの接続は未実装です。「次の作業」は3D検証内の候補であり、全体の開発順を固定しません。
+
 ## 別環境への引き継ぎ：最初に読む現在の状態
 
 最終整理日：2026-10-23。この節は現在の状態を示す。後半の「開発履歴」にある「初期選択」「未対応」「時間制約」は各段階の当時の状態であり、この節・現在のREADME・実装を優先する。
@@ -48,7 +50,7 @@
 **このMarkdownだけではアプリは再現できない。** 少なくとも `apps/3d-motion-lab` のソース・設定・`package.json`・`package-lock.json`、および `docs/plan` を同じ相対配置で移す。`node_modules` と `dist` は再生成でき、別OSのものを持ち込む必要はない。Gitのコミットやリモートへの反映は本作業で実施していないため、別環境に最新ファイルが届いていることを確認する。
 
 1. この「現在の状態」を読む。
-2. [アプリREADME](../../apps/3d-motion-lab/README.md)で詳細な仕様と目視確認手順を読む。[初期構想](piano-performance-simulator-spec.md)は背景資料として読む。初期MVPの限定範囲を、実装済みの機能へ適用し直さない。
+2. [アプリREADME](../../../apps/3d-motion-lab/README.md)で詳細な仕様と目視確認手順を読む。[初期構想](piano-performance-simulator-spec.md)は背景資料として読む。初期MVPの限定範囲を、実装済みの機能へ適用し直さない。
 3. Node.js 24系とnpmを用意する。直近の実行環境はWindows、Node.js 24.19.0。OS別のネイティブ機能や外部3Dモデルは不要だが、他OSの動作は未確認。
 4. プロジェクトルートから次を実行する。インストールにはnpmレジストリへの接続が必要。
 
@@ -94,7 +96,7 @@
 
 第6引数は手首連動の有無で、API既定値`false`、UIは`true`を明示する。`wrist-motion.ts`が打鍵2方式×非演奏指2方式で共通の動作量を検証しキャッシュ。どの動作量も届かなければ手首を固定する。フレームの`wristMotion`で適用を示し、`forearmGuide`を`forearmEndpoints`の第3引数へ渡して描画する。`handPointLocal`は既存の手首軸の回転（Euler XYZ、Y=0）の逆変換。指の幾何解には元の親指対向量を引き継ぐ。
 
-入力形式と再実行方法は [譜面JSONとタイの仕様](../../apps/3d-motion-lab/score-input.md) を参照。normalizePerformanceは入力を変更せず、明示したtie:start→continue…→stopを同じ手・声部・音程・指で結合。temposを積分し、音符・休符の両端を秒へ変換する。notes／sources／originsで元音符との対応を持つ。validateは正規化後に到達と接触を検証する。音符配列だけでは終端の休符を失うため、UIはinputLengthも参照する。
+入力形式と再実行方法は [譜面JSONとタイの仕様](../../../apps/3d-motion-lab/score-input.md) を参照。normalizePerformanceは入力を変更せず、明示したtie:start→continue…→stopを同じ手・声部・音程・指で結合。temposを積分し、音符・休符の両端を秒へ変換する。notes／sources／originsで元音符との対応を持つ。validateは正規化後に到達と接触を検証する。音符配列だけでは終端の休符を失うため、UIはinputLengthも参照する。
 
 ### 最終確認と次の判断
 

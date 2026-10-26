@@ -1,8 +1,8 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
-  import type { ScoreProject } from '../model/project';
+  import { getLocatedVoiceElements, getNoteValueLabel, getNoteValueSixteenths, type ScoreProject } from '../model/project';
   import type { OutlineCursor } from '../state/outline-cursor';
-  import { getDiatonicPitchClasses, isTimelinePlacementInvalid, type TimelineCursor } from '../state/timeline-cursor';
+  import { getDiatonicPitchClasses, getLocatedTimelineNotes, isTimelinePlacementInvalid, type TimelineCursor } from '../state/timeline-cursor';
 
   let { outline, cursor, timelineCursor, mode }: {
     outline: ScoreProject['outline'];
@@ -76,14 +76,34 @@
   const pitchRowHeight = 24;
   const cursorLineWidth = 10;
   const cursorPlacementInvalid = $derived(isTimelinePlacementInvalid(outline, timelineCursor));
+  const cursorWidth = $derived(getNoteValueSixteenths(timelineCursor.placementValue) * pixelsPerSixteenth);
   function isDiatonicMidi(midi: number) {
     const pitchClass = ((midi % 12) + 12) % 12;
     return pitches.find((pitch) => pitch.midi % 12 === pitchClass)?.isDiatonic ?? false;
   }
-  const pixelsPerOperationUnit = $derived(
-    pixelsPerWhole * timelineCursor.operationUnit.cnt / timelineCursor.operationUnit.unit,
-  );
   const measures = $derived(outline.filter((block) => block.type === 'measure'));
+  const measureNotes = $derived(measures.map((measure) => {
+    const voice = measure.data.upperStaff.voices[0];
+    return voice ? getLocatedVoiceElements(voice, measure.data.length).flatMap((entry) =>
+      entry.element.kind === 'note' ? [{ note: entry.element, position: entry.positionSixteenths, length: entry.lengthSixteenths }] : [],
+    ) : [];
+  }));
+  const locatedNotes = $derived(getLocatedTimelineNotes(outline));
+  const focusedNote = $derived(locatedNotes.find(({ note }) => note.id === timelineCursor.focusedNoteId));
+  const tiePaths = $derived.by(() => {
+    const notes = locatedNotes;
+    const byId = new Map(notes.map((entry) => [entry.note.id, entry]));
+    return notes.flatMap(({ note, measureStartSixteenths, positionSixteenths }) => {
+      const next = note.tieTo ? byId.get(note.tieTo) : undefined;
+      if (!next || next.note.tieFrom !== note.id) return [];
+      const x1 = (measureStartSixteenths + positionSixteenths + getNoteValueSixteenths(note.value) / 2) * pixelsPerSixteenth;
+      const x2 = (next.measureStartSixteenths + next.positionSixteenths + getNoteValueSixteenths(next.note.value) / 2) * pixelsPerSixteenth;
+      return note.pitches.map((pitch) => {
+        const y = pitchTopMargin + (108 - pitch.midi) * pitchRowHeight + pitchRowHeight / 2;
+        return { id: `${note.id}-${next.note.id}-${pitch.midi}`, path: `M ${x1} ${y} Q ${(x1 + x2) / 2} ${y + pitchRowHeight} ${x2} ${y}` };
+      });
+    });
+  });
   const focusedSectionPosition = $derived.by(() => {
     let position = 0;
     for (const block of outline) {
@@ -261,21 +281,22 @@
           <div class="timeline-cursor-line"></div>
           <div
             class="timeline-cursor-note"
-            style={`top: ${pitchTopMargin + (108 - timelineCursor.pitch) * pitchRowHeight}px; width: ${Math.max(0, pixelsPerOperationUnit - cursorLineWidth)}px`}
+            style={`top: ${pitchTopMargin + (108 - timelineCursor.pitch) * pitchRowHeight}px; width: ${Math.max(0, cursorWidth - cursorLineWidth)}px`}
           >
-            <span class="operation-unit-badge">
-              {timelineCursor.operationUnit.cnt}/{timelineCursor.operationUnit.unit}
+            <span class="note-value-badge">
+              Input {getNoteValueLabel(timelineCursor.placementValue)}
             </span>
           </div>
         </div>
       {/if}
-      {#if mode === 'timeline' && timelineCursor.focusedNoteId !== null}
+      {#if mode === 'timeline' && focusedNote}
         <span
-          class="operation-unit-badge note-focused-operation-badge"
-          style={`left: ${timelineCursor.positionSixteenths * pixelsPerSixteenth + 4}px; top: ${pitchTopMargin + (108 - timelineCursor.pitch) * pitchRowHeight - 52}px`}
+          class="note-value-badge note-focused-value-badge"
+          style={`left: ${(focusedNote.measureStartSixteenths + focusedNote.positionSixteenths) * pixelsPerSixteenth + 4}px; top: ${pitchTopMargin + (108 - timelineCursor.pitch) * pitchRowHeight - 52}px`}
           aria-hidden="true"
         >
-          {timelineCursor.operationUnit.cnt}/{timelineCursor.operationUnit.unit}
+          <span class="focused-note-value">Note {getNoteValueLabel(focusedNote.note.value)}</span>
+          <span>Input {getNoteValueLabel(timelineCursor.placementValue)}</span>
         </span>
       {/if}
       {#if focusedSectionPosition !== null}
@@ -314,11 +335,12 @@
               aria-hidden="true"
             ></div>
           {/each}
-          {#each measure.data.upperStaff.voices[0]?.notes ?? [] as note (note.id)}
+          {#each measureNotes[index] as entry (entry.note.id)}
+            {@const note = entry.note}
             {#if mode === 'timeline' && timelineCursor.focusedNoteId === note.id}
               <div
                 class="note-focus-column"
-                style={`left: ${note.positionSixteenths * pixelsPerSixteenth}px; width: ${(note.duration.cnt / note.duration.unit) * pixelsPerWhole}px`}
+                style={`left: ${entry.position * pixelsPerSixteenth}px; width: ${entry.length * pixelsPerSixteenth}px`}
                 aria-hidden="true"
               ></div>
             {/if}
@@ -330,12 +352,19 @@
                 class:unselected={mode === 'timeline' && timelineCursor.focusedNoteId === note.id && timelineCursor.focusedPitchIndex !== pitchIndex}
                 aria-label={`Note ${note.id}`}
                 aria-current={mode === 'timeline' && timelineCursor.focusedNoteId === note.id && timelineCursor.focusedPitchIndex === pitchIndex ? 'true' : undefined}
-                style={`left: ${note.positionSixteenths * pixelsPerSixteenth}px; top: ${pitchTopMargin + (108 - pitch.midi) * pitchRowHeight}px; width: ${(note.duration.cnt / note.duration.unit) * pixelsPerWhole}px`}
+                style={`left: ${entry.position * pixelsPerSixteenth}px; top: ${pitchTopMargin + (108 - pitch.midi) * pitchRowHeight}px; width: ${entry.length * pixelsPerSixteenth}px`}
               ></div>
             {/each}
           {/each}
         </div>
       {/each}
+      {#if tiePaths.length > 0}
+        <svg class="tie-links" width="100%" height="100%" aria-hidden="true">
+          {#each tiePaths as tie (tie.id)}
+            <path d={tie.path}></path>
+          {/each}
+        </svg>
+      {/if}
     </div>
   </section>
 </section>
@@ -556,7 +585,7 @@
     background: #5bd66c;
   }
 
-  .operation-unit-badge {
+  .note-value-badge {
     position: absolute;
     top: -52px;
     left: 4px;
@@ -571,8 +600,26 @@
     white-space: nowrap;
   }
 
-  .note-focused-operation-badge {
+  .note-focused-value-badge {
     z-index: 6;
+    display: flex;
+    gap: 10px;
+  }
+
+  .focused-note-value {
+    color: #ffe0ad;
+  }
+
+  .tie-links {
+    position: absolute;
+    z-index: 5;
+    top: 0;
+    left: 0;
+    overflow: visible;
+    pointer-events: none;
+    fill: none;
+    stroke: #334f3c;
+    stroke-width: 2;
   }
 
   .measure-region {

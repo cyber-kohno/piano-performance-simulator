@@ -5,6 +5,8 @@ const HOLD_BINDINGS = {
   pitchSelection: ['ShiftLeft', 'ShiftRight'],
   diatonicMovement: ['KeyC'],
   noteNavigation: ['KeyE'],
+  noteValueEditing: ['KeyF'],
+  notePositionEditing: ['KeyD'],
 } as const;
 
 export function createKeyHold() {
@@ -49,6 +51,12 @@ export function createKeyHold() {
     },
     get noteNavigation() {
       return HOLD_BINDINGS.noteNavigation.some((code) => pressed.has(code));
+    },
+    get noteValueEditing() {
+      return HOLD_BINDINGS.noteValueEditing.some((code) => pressed.has(code));
+    },
+    get notePositionEditing() {
+      return HOLD_BINDINGS.notePositionEditing.some((code) => pressed.has(code));
     },
   };
 }

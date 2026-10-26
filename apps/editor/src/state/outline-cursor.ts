@@ -1,4 +1,4 @@
-import { createMeasureData, type OutlineBlock, type ScoreProject } from '../model/project';
+import { createMeasureData, reconcileOutlineTies, type OutlineBlock, type ScoreProject } from '../model/project.ts';
 
 /** Transient editing state, separate from the saved project data. */
 export type OutlineCursor = {
@@ -8,6 +8,24 @@ export type OutlineCursor = {
 export function createOutlineCursor(outline: ScoreProject['outline']): OutlineCursor {
   // Like Scorehack, start at the first section after the initial values.
   return { blockId: outline[1].id };
+}
+
+export function deleteOutlineBlock(
+  outline: ScoreProject['outline'],
+  cursor: OutlineCursor,
+): { outline: ScoreProject['outline']; cursor: OutlineCursor } {
+  const index = outline.findIndex((block) => block.id === cursor.blockId);
+  const firstSectionIndex = outline.findIndex((block) => block.type === 'section');
+  if (index < 0 || outline[index].type === 'init' || index === firstSectionIndex) {
+    return { outline, cursor };
+  }
+
+  const nextOutline = [...outline];
+  nextOutline.splice(index, 1);
+  return {
+    outline: reconcileOutlineTies(nextOutline as ScoreProject['outline']),
+    cursor: { blockId: nextOutline[index - 1].id },
+  };
 }
 
 export function moveOutlineCursor(
@@ -77,7 +95,7 @@ export function addMeasureAfterCursor(
   nextOutline.splice(insertionIndex, 0, measure);
 
   return {
-    outline: nextOutline as ScoreProject['outline'],
+    outline: reconcileOutlineTies(nextOutline as ScoreProject['outline']),
     cursor,
   };
 }
