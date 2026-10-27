@@ -15,6 +15,10 @@ import {
   moveFocusedTimelineNote,
   appendFocusedTimelineTie,
   resizeFocusedTimelineTie,
+  getSelectedTimelineNotes, extendTimelineNoteSelection, collapseTimelineNoteSelection,
+  transposeSelectedTimelineNotes,
+  resetTimelineCursorForStaff, switchTimelineStaff, duplicateFocusedTimelineNoteAfter,
+  toggleTieToAdjacentTimelineNote,
 } from '../src/state/timeline-cursor.ts';
 import { addMeasureAfterCursor, deleteOutlineBlock } from '../src/state/outline-cursor.ts';
 
@@ -45,6 +49,301 @@ function assertComplete(project) {
     }
   }
 }
+
+test('range selection expands and shrinks around a fixed anchor across rests and measures', () => {
+  const first = addTimelineNoteAt(blankProject(2), createTimelineCursor(), 0, 60);
+  const second = addTimelineNoteAt(first.project, first.cursor, 8, 65);
+  const third = addTimelineNoteAt(second.project, second.cursor, 20, 72);
+  const before = structuredClone(third.project);
+  let cursor = extendTimelineNoteSelection(third.project.outline, second.cursor, 1);
+  assert.equal(cursor.selectionAnchorNoteId, second.cursor.focusedNoteId);
+  assert.equal(cursor.focusedPitchIndex, null);
+  assert.deepEqual(getSelectedTimelineNotes(third.project.outline, cursor).map(({ note }) => note.id),
+    [second.cursor.focusedNoteId, third.cursor.focusedNoteId]);
+  assert.equal(extendTimelineNoteSelection(third.project.outline, cursor, 1), cursor);
+  cursor = extendTimelineNoteSelection(third.project.outline, cursor, -1);
+  assert.equal(getSelectedTimelineNotes(third.project.outline, cursor).length, 1);
+  assert.equal(cursor.focusedPitchIndex, 0);
+  cursor = extendTimelineNoteSelection(third.project.outline, cursor, -1);
+  assert.equal(cursor.selectionAnchorNoteId, second.cursor.focusedNoteId);
+  assert.equal(cursor.focusedNoteId, first.cursor.focusedNoteId);
+  assert.equal(getSelectedTimelineNotes(third.project.outline, cursor).length, 2);
+  assert.equal(cursor.pitch, 60);
+  assert.equal(extendTimelineNoteSelection(third.project.outline, cursor, -1), cursor);
+  assert.deepEqual(third.project, before);
+  const input = createTimelineCursor();
+  assert.equal(extendTimelineNoteSelection(third.project.outline, input, 1), input);
+});
+
+test('staff note positions derive independently from each staff’s saved rest sequence', () => {
+  const state = singleNote(65);
+  const measure = state.project.outline[2];
+  measure.data.lowerStaff.voices[0].elements = [
+    { id: 'lower-rest-before', kind: 'rest', value: { type: 'quarter', dots: 0 } },
+    { id: 'lower-note', kind: 'note', value: { type: 'quarter', dots: 0 }, pitches: [{ midi: 48 }] },
+    { id: 'lower-rest-after', kind: 'rest', value: { type: 'half', dots: 0 } },
+  ];
+  const upper = getLocatedTimelineNotes(state.project.outline);
+  const lower = getLocatedTimelineNotes(state.project.outline, 'lowerStaff');
+  assert.equal(upper.length, 1);
+  assert.equal(upper[0].note.pitches[0].midi, 65);
+  assert.equal(upper[0].positionSixteenths, 0);
+  assert.equal(lower.length, 1);
+  assert.equal(lower[0].note.id, 'lower-note');
+  assert.equal(lower[0].note.pitches[0].midi, 48);
+  assert.equal(lower[0].positionSixteenths, 4);
+  assertComplete(state.project);
+});
+
+test('staff switches reset to the current measure head, quarter input and fixed C4/C3 without selection', () => {
+  const project = blankProject(2, { cnt: 3, unit: 4 });
+  project.outline[0].data.timeSignature = { cnt: 6, unit: 8 };
+  const cursor = {
+    ...createTimelineCursor(), positionSixteenths: 19, pitch: 90,
+    focusedNoteId: 'old-focus', selectionAnchorNoteId: 'old-anchor', focusedPitchIndex: 2,
+  };
+  const lower = switchTimelineStaff(project.outline, cursor);
+  assert.equal(lower.staff, 'lowerStaff');
+  assert.equal(lower.positionSixteenths, 12);
+  assert.equal(lower.pitch, 48);
+  assert.deepEqual(lower.placementValue, { type: 'quarter', dots: 0 });
+  assert.equal(lower.focusedNoteId, null);
+  assert.equal(lower.focusedPitchIndex, null);
+  assert.equal(lower.selectionAnchorNoteId, null);
+  const upper = switchTimelineStaff(project.outline, { ...lower, positionSixteenths: 22, pitch: 21 });
+  assert.equal(upper.staff, 'upperStaff');
+  assert.equal(upper.pitch, 60);
+  assert.equal(upper.positionSixteenths, 12);
+  assert.deepEqual(upper.placementValue, { type: 'quarter', dots: 0 });
+  const reentered = resetTimelineCursorForStaff(project.outline, {
+    ...lower, positionSixteenths: 19, placementValue: { type: 'eighth', dots: 0 },
+  }, 'upperStaff');
+  assert.deepEqual(reentered, upper);
+  assert.equal(switchTimelineStaff(blankProject(0).outline, createTimelineCursor()).pitch, 48);
+});
+
+test('lower staff chord, value, tie, duplication, movement and deletion edits leave overlapping upper notes intact', () => {
+  const upperFirst = addTimelineNoteAt(blankProject(), setTimelineCursorUnit(createTimelineCursor(), '3'), 0, 72);
+  const upperSecond = addTimelineNoteAt(upperFirst.project, upperFirst.cursor, 8, 72);
+  const before = structuredClone(upperSecond.project.outline[2].data.upperStaff);
+  const lowerCursor = resetTimelineCursorForStaff(upperSecond.project.outline, upperSecond.cursor, 'lowerStaff');
+  let state = addTimelineNoteAt(upperSecond.project, lowerCursor);
+  assert.equal(state.cursor.staff, 'lowerStaff');
+  assert.equal(getLocatedTimelineNotes(state.project.outline, 'lowerStaff')[0].note.pitches[0].midi, 48);
+  state = addFocusedNotePitch(state.project, state.cursor);
+  state = moveFocusedTimelineNotePitch(state.project, state.cursor, -1);
+  state = appendFocusedTimelineTie(state.project, state.cursor);
+  assert.equal(getTimelineTieChain(state.project.outline, state.cursor.focusedNoteId, 'lowerStaff').length, 2);
+  state = setFocusedTimelineNoteType(state.project, state.cursor, '2');
+  state = toggleFocusedTimelineNoteDot(state.project, state.cursor);
+  assert.equal(getLocatedTimelineNote(state.project.outline, state.cursor.focusedNoteId, 'lowerStaff').note.value.dots, 1);
+  state = resizeFocusedTimelineTie(state.project, setTimelineCursorUnit(state.cursor, '1'), 1);
+  const sourceId = state.cursor.focusedNoteId;
+  const source = getLocatedTimelineNote(state.project.outline, sourceId, 'lowerStaff');
+  assert.deepEqual(source.note.value, { type: 'half', dots: 0 });
+  state = duplicateFocusedTimelineNoteAfter(state.project, state.cursor);
+  const duplicateId = state.cursor.focusedNoteId;
+  assert.deepEqual(getLocatedTimelineNote(state.project.outline, duplicateId, 'lowerStaff').note.pitches, source.note.pitches);
+  assert.equal(state.cursor.positionSixteenths, 8);
+  const sourceCursor = { ...state.cursor, focusedNoteId: sourceId, positionSixteenths: 0 };
+  const linked = toggleTieToAdjacentTimelineNote(state.project, sourceCursor);
+  assert.equal(getLocatedTimelineNote(linked.outline, sourceId, 'lowerStaff').note.tieTo, duplicateId);
+  state.project = toggleTieToAdjacentTimelineNote(linked, sourceCursor);
+  state = moveFocusedTimelineNote(state.project, state.cursor, 1);
+  assert.equal(state.cursor.positionSixteenths, 9);
+  state = deleteFocusedTimelineNote(state.project, state.cursor, true);
+  assert.equal(getLocatedTimelineNote(state.project.outline, duplicateId, 'lowerStaff').note.pitches.length, 1);
+  const next = focusAdjacentTimelineNote(state.project.outline, state.cursor, -1);
+  assert.equal(next.focusedNoteId, sourceId);
+  assert.equal(findTimelineNoteAtMove(state.project.outline, {
+    ...state.cursor, focusedNoteId: null, focusedPitchIndex: null, positionSixteenths: 0,
+  }, 1).note.id, sourceId);
+  state = deleteFocusedTimelineNote(state.project, state.cursor);
+  assert.deepEqual(state.project.outline[2].data.upperStaff, before);
+  assert.equal(getLocatedTimelineNotes(state.project.outline, 'lowerStaff').length, 1);
+  assertComplete(state.project);
+});
+
+test('lower staff range selection, movement, transposition and bulk deletion never select or edit the upper staff', () => {
+  const upper = addTimelineNoteAt(blankProject(), createTimelineCursor(), 0, 84);
+  const before = structuredClone(upper.project.outline[2].data.upperStaff);
+  const first = addTimelineNoteAt(upper.project, createTimelineCursor('lowerStaff'), 0, 48);
+  const second = addTimelineNoteAt(first.project, first.cursor, 8, 55);
+  const cursor = extendTimelineNoteSelection(second.project.outline, first.cursor, 1);
+  assert.deepEqual(getSelectedTimelineNotes(second.project.outline, cursor).map(entry => entry.note.id),
+    [first.cursor.focusedNoteId, second.cursor.focusedNoteId]);
+  let state = moveFocusedTimelineNote(second.project, cursor, 1);
+  assert.deepEqual(getLocatedTimelineNotes(state.project.outline, 'lowerStaff').map(entry => entry.positionSixteenths), [1, 9]);
+  state = transposeSelectedTimelineNotes(state.project, state.cursor, 1);
+  assert.deepEqual(getLocatedTimelineNotes(state.project.outline, 'lowerStaff').map(entry => entry.note.pitches[0].midi), [49, 56]);
+  state = deleteFocusedTimelineNote(state.project, state.cursor);
+  assert.equal(state.cursor.staff, 'lowerStaff');
+  assert.equal(getLocatedTimelineNotes(state.project.outline, 'lowerStaff').length, 0);
+  assert.deepEqual(state.project.outline[2].data.upperStaff, before);
+  assertComplete(state.project);
+});
+
+test('range collapse picks the requested edge and ordinary note navigation clears the range even at the score end', () => {
+  const first = singleNote();
+  const second = addTimelineNoteAt(first.project, first.cursor, 8, 72);
+  const range = extendTimelineNoteSelection(second.project.outline, first.cursor, 1);
+  for (const direction of [-1, 1]) {
+    const cursor = collapseTimelineNoteSelection(second.project.outline, range, direction);
+    assert.equal(cursor.focusedNoteId, direction === -1 ? first.cursor.focusedNoteId : second.cursor.focusedNoteId);
+    assert.equal(cursor.selectionAnchorNoteId, null);
+    assert.equal(getSelectedTimelineNotes(second.project.outline, cursor).length, 1);
+  }
+  const atEnd = focusAdjacentTimelineNote(second.project.outline, range, 1);
+  assert.equal(atEnd.focusedNoteId, second.cursor.focusedNoteId);
+  assert.equal(atEnd.selectionAnchorNoteId, null);
+  assert.equal(atEnd.focusedPitchIndex, 0);
+});
+
+test('range transposition moves every chord pitch exactly one semitone and preserves all intervals and editing state', () => {
+  for (const direction of [-1, 1]) {
+    const first = singleNote(65);
+    pitchesOf(first).push({ midi: 60, fingering: 1 });
+    const second = addTimelineNoteAt(first.project, first.cursor, 8, 74);
+    pitchesOf(second).push({ midi: 67, fingering: 5 });
+    const other = addTimelineNoteAt(second.project, second.cursor, 12, 80);
+    const cursor = extendTimelineNoteSelection(other.project.outline, first.cursor, 1);
+    const before = structuredClone(other.project);
+    const moved = transposeSelectedTimelineNotes(other.project, cursor, direction);
+    for (const id of [first.cursor.focusedNoteId, second.cursor.focusedNoteId]) {
+      const original = getLocatedTimelineNote(other.project.outline, id);
+      const updated = getLocatedTimelineNote(moved.project.outline, id);
+      assert.deepEqual(updated.note, {
+        ...original.note,
+        pitches: original.note.pitches.map(pitch => ({ ...pitch, midi: pitch.midi + direction })),
+      });
+      assert.equal(updated.positionSixteenths, original.positionSixteenths);
+    }
+    assert.deepEqual(getLocatedTimelineNote(moved.project.outline, other.cursor.focusedNoteId).note,
+      getLocatedTimelineNote(other.project.outline, other.cursor.focusedNoteId).note);
+    assert.equal(moved.cursor.focusedPitchIndex, null);
+    assert.equal(moved.cursor.pitch, 74 + direction);
+    assert.equal(moved.cursor.selectionAnchorNoteId, cursor.selectionAnchorNoteId);
+    assert.deepEqual(moved.cursor.placementValue, cursor.placementValue);
+    assert.deepEqual(other.project, before);
+    assertComplete(moved.project);
+  }
+});
+
+test('range transposition rejects every edit if any pitch would exceed either piano bound', () => {
+  for (const direction of [-1, 1]) {
+    const first = singleNote(direction === 1 ? 108 : 25);
+    if (direction === -1) pitchesOf(first).push({ midi: 21 });
+    const second = addTimelineNoteAt(first.project, first.cursor, 8, 60);
+    const cursor = extendTimelineNoteSelection(second.project.outline, first.cursor, 1);
+    const before = structuredClone(second.project);
+    assert.equal(transposeSelectedTimelineNotes(second.project, cursor, direction), undefined);
+    assert.deepEqual(second.project, before);
+    assert.ok(transposeSelectedTimelineNotes(second.project, cursor, -direction));
+  }
+  const single = singleNote();
+  assert.equal(transposeSelectedTimelineNotes(single.project, single.cursor, 1), undefined);
+  assert.equal(transposeSelectedTimelineNotes(single.project, createTimelineCursor(), 1), undefined);
+});
+
+test('range transposition preserves internal ties and removes mismatched ties outside the selection', () => {
+  const first = singleNote();
+  const second = appendFocusedTimelineTie(first.project, first.cursor);
+  const third = appendFocusedTimelineTie(second.project, second.cursor);
+  const cursor = extendTimelineNoteSelection(third.project.outline, second.cursor, 1);
+  const moved = transposeSelectedTimelineNotes(third.project, cursor, 1);
+  const notes = getLocatedTimelineNotes(moved.project.outline).map(entry => entry.note);
+  assert.deepEqual(notes.map(note => note.pitches[0].midi), [60, 61, 61]);
+  assert.equal(notes[0].tieTo, undefined);
+  assert.equal(notes[1].tieFrom, undefined);
+  assert.equal(notes[1].tieTo, notes[2].id);
+  assert.equal(notes[2].tieFrom, notes[1].id);
+  assertComplete(moved.project);
+});
+
+test('moving a range preserves spacing, identity, chord fingering and range endpoints', () => {
+  const first = addTimelineNoteAt(blankProject(2), createTimelineCursor(), 1, 65);
+  const chord = addFocusedNotePitch(first.project, first.cursor);
+  pitchesOf(chord)[1].fingering = 5;
+  const second = addTimelineNoteAt(chord.project, chord.cursor, 4, 72);
+  const other = addTimelineNoteAt(second.project, second.cursor, 10, 80);
+  const cursor = extendTimelineNoteSelection(other.project.outline, chord.cursor, 1);
+  const before = structuredClone(other.project);
+  const moved = moveFocusedTimelineNote(other.project, cursor, 1);
+  assert.deepEqual(getLocatedTimelineNotes(moved.project.outline).map(entry => entry.positionSixteenths), [2, 5, 10]);
+  assert.equal(moved.cursor.selectionAnchorNoteId, chord.cursor.focusedNoteId);
+  assert.equal(moved.cursor.focusedNoteId, second.cursor.focusedNoteId);
+  assert.equal(moved.cursor.positionSixteenths, 5);
+  assert.equal(getSelectedTimelineNotes(moved.project.outline, moved.cursor).length, 2);
+  assert.deepEqual(getLocatedTimelineNote(moved.project.outline, chord.cursor.focusedNoteId).note,
+    getLocatedTimelineNote(other.project.outline, chord.cursor.focusedNoteId).note);
+  assert.deepEqual(other.project, before);
+  const reversed = moveFocusedTimelineNote(moved.project, moved.cursor, -1);
+  assert.deepEqual(getLocatedTimelineNotes(reversed.project.outline).map(entry => entry.positionSixteenths), [1, 4, 10]);
+  assertComplete(moved.project);
+  assertComplete(reversed.project);
+});
+
+test('range movement rejects all edits on any collision, score overflow or individual bar crossing', () => {
+  const first = singleNote();
+  const second = addTimelineNoteAt(first.project, first.cursor, 4, 72);
+  const other = addTimelineNoteAt(second.project, second.cursor, 5, 80);
+  const range = extendTimelineNoteSelection(other.project.outline, first.cursor, 1);
+  const before = structuredClone(other.project);
+  assert.equal(moveFocusedTimelineNote(other.project, range, 1), undefined);
+  assert.equal(moveFocusedTimelineNote(other.project, range, -1), undefined);
+  assert.deepEqual(other.project, before);
+  const tail = addTimelineNoteAt(blankProject(), createTimelineCursor(), 14);
+  const end = addTimelineNoteAt(tail.project, tail.cursor, 15);
+  assert.equal(moveFocusedTimelineNote(end.project, extendTimelineNoteSelection(end.project.outline, tail.cursor, 1), 1), undefined);
+  const eighth = setTimelineCursorUnit(createTimelineCursor(), '2');
+  const early = addTimelineNoteAt(blankProject(2), eighth, 0);
+  const late = addTimelineNoteAt(early.project, eighth, 13);
+  assert.equal(moveFocusedTimelineNote(late.project, extendTimelineNoteSelection(late.project.outline, early.cursor, 1), 1), undefined);
+});
+
+test('adjacent selected notes can move into each other’s old positions and across a bar', () => {
+  const first = addTimelineNoteAt(blankProject(2), createTimelineCursor(), 15);
+  const second = addTimelineNoteAt(first.project, first.cursor, 16);
+  const range = extendTimelineNoteSelection(second.project.outline, first.cursor, 1);
+  const moved = moveFocusedTimelineNote(second.project, range, 1);
+  assert.deepEqual(getLocatedTimelineNotes(moved.project.outline).map(entry => entry.measureStartSixteenths + entry.positionSixteenths), [16, 17]);
+  assert.equal(getSelectedTimelineNotes(moved.project.outline, moved.cursor).length, 2);
+  assertComplete(moved.project);
+});
+
+test('range movement preserves internal ties and detaches only ties to notes left outside the selection', () => {
+  const first = singleNote();
+  const second = appendFocusedTimelineTie(first.project, first.cursor);
+  const third = appendFocusedTimelineTie(second.project, second.cursor);
+  const cursor = extendTimelineNoteSelection(third.project.outline, second.cursor, 1);
+  const moved = moveFocusedTimelineNote(third.project, cursor, 1);
+  const notes = getLocatedTimelineNotes(moved.project.outline).map(entry => entry.note);
+  assert.equal(notes[0].tieTo, undefined);
+  assert.equal(notes[1].tieFrom, undefined);
+  assert.equal(notes[1].tieTo, notes[2].id);
+  assert.equal(notes[2].tieFrom, notes[1].id);
+  assert.deepEqual(getLocatedTimelineNotes(moved.project.outline).map(entry => entry.positionSixteenths), [0, 2, 3]);
+  assertComplete(moved.project);
+});
+
+test('bulk deletion replaces only selected notes with equal rests, preserves later onsets and clears selection', () => {
+  const first = singleNote();
+  const second = appendFocusedTimelineTie(first.project, first.cursor);
+  const third = appendFocusedTimelineTie(second.project, second.cursor);
+  const later = addTimelineNoteAt(third.project, third.cursor, 8, 80);
+  const range = extendTimelineNoteSelection(later.project.outline, second.cursor, 1);
+  const before = structuredClone(later.project);
+  const deleted = deleteFocusedTimelineNote(later.project, range);
+  assert.deepEqual(getLocatedTimelineNotes(deleted.project.outline).map(entry => entry.positionSixteenths), [0, 8]);
+  assert.equal(getLocatedTimelineNote(deleted.project.outline, first.cursor.focusedNoteId).note.tieTo, undefined);
+  assert.equal(deleted.cursor.focusedNoteId, null);
+  assert.equal(deleted.cursor.selectionAnchorNoteId, null);
+  assert.equal(deleted.cursor.positionSixteenths, 1);
+  assert.deepEqual(later.project, before);
+  assert.ok(addTimelineNoteAt(deleted.project, deleted.cursor));
+  assert.equal(deleteFocusedTimelineNote(later.project, range, true), undefined);
+  assertComplete(deleted.project);
+});
 
 test('new measures fill both staves with full-measure rests using actual length', () => {
   for (const length of [{ cnt: 4, unit: 4 }, { cnt: 3, unit: 4 }, { cnt: 1, unit: 4 }, { cnt: 6, unit: 8 }]) {
@@ -760,6 +1059,49 @@ test('chord addition, pitch selection and movement retain fingering, order and v
   assert.deepEqual(pitchesOf(reversed)[0], { midi: 62, fingering: 1 });
   assert.deepEqual(initial.project, before);
   assertComplete(reversed.project);
+});
+
+test('chord addition permits 15 semitones and rejects a major tenth without changing the score', () => {
+  const initial = singleNote(75);
+  pitchesOf(initial).push({ midi: 61 });
+  const cursor = { ...initial.cursor, focusedPitchIndex: 1, pitch: 61 };
+  const allowed = addFocusedNotePitch(initial.project, cursor);
+  assert.deepEqual(pitchesOf(allowed).map((pitch) => pitch.midi), [75, 61, 60]);
+  const before = structuredClone(allowed);
+  assert.equal(addFocusedNotePitch(allowed.project, allowed.cursor), undefined);
+  assert.deepEqual(allowed, before);
+  assertComplete(allowed.project);
+});
+
+test('pitch movement rejects a major tenth in either direction, including skipped and diatonic pitches', () => {
+  const state = singleNote(74);
+  pitchesOf(state).push({ midi: 60 });
+  const allowed = moveFocusedTimelineNotePitch(state.project, state.cursor, 1);
+  assert.deepEqual(pitchesOf(allowed).map((pitch) => pitch.midi), [75, 60]);
+  const before = structuredClone(allowed);
+  assert.equal(moveFocusedTimelineNotePitch(allowed.project, allowed.cursor, 1), undefined);
+  const low = { ...allowed.cursor, focusedPitchIndex: 1, pitch: 60 };
+  assert.equal(moveFocusedTimelineNotePitch(allowed.project, low, -1), undefined);
+  assert.equal(moveFocusedTimelineNotePitch(allowed.project, allowed.cursor, 1, { fifths: 0 }), undefined);
+  assert.deepEqual(allowed, before);
+  const skipped = singleNote(61);
+  pitchesOf(skipped).push({ midi: 60 }, { midi: 46 });
+  assert.equal(moveFocusedTimelineNotePitch(skipped.project, {
+    ...skipped.cursor, focusedPitchIndex: 1, pitch: 60,
+  }, 1), undefined);
+});
+
+test('rejected chord edits preserve every segment of a tied chord', () => {
+  const state = singleNote(75);
+  pitchesOf(state).push({ midi: 60, fingering: 5 });
+  const tied = appendFocusedTimelineTie(state.project, state.cursor);
+  const before = structuredClone(tied);
+  assert.equal(moveFocusedTimelineNotePitch(tied.project, tied.cursor, 1), undefined);
+  assert.equal(addFocusedNotePitch(tied.project, {
+    ...tied.cursor, focusedPitchIndex: 1, pitch: 60,
+  }), undefined);
+  assert.deepEqual(tied, before);
+  assertComplete(tied.project);
 });
 
 test('piano bounds and occupied chord pitches reject edits', () => {

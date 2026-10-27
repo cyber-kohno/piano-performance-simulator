@@ -2,7 +2,8 @@ import { onMount } from 'svelte';
 
 // Physical keys and logical actions are separate so bindings can change later.
 const HOLD_BINDINGS = {
-  pitchSelection: ['ShiftLeft', 'ShiftRight'],
+  rangeSelection: ['ShiftLeft', 'ShiftRight'],
+  pitchSelection: ['KeyE'],
   diatonicMovement: ['KeyC'],
   noteNavigation: ['KeyE'],
   noteValueEditing: ['KeyF'],
@@ -17,7 +18,6 @@ export function createKeyHold() {
     const next = new Set(pressed);
     if (down) next.add(event.code);
     else next.delete(event.code);
-    // Recover from a missed modifier release even while the window is active.
     if (!event.shiftKey) {
       next.delete('ShiftLeft');
       next.delete('ShiftRight');
@@ -43,6 +43,9 @@ export function createKeyHold() {
   });
 
   return {
+    get rangeSelection() {
+      return HOLD_BINDINGS.rangeSelection.some((code) => pressed.has(code));
+    },
     get pitchSelection() {
       return HOLD_BINDINGS.pitchSelection.some((code) => pressed.has(code));
     },

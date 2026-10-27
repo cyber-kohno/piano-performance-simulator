@@ -34,6 +34,7 @@ export type PianoMeasureRest = { id: string; kind: 'measure-rest' };
 export type PianoVoiceElement = PianoNote | PianoRest | PianoMeasureRest;
 export type PianoVoice = { id: string; elements: PianoVoiceElement[] };
 export type PianoStaff = { voices: PianoVoice[] };
+export type PianoStaffName = 'upperStaff' | 'lowerStaff';
 
 export type InitialValues = {
   keySignature: KeySignature;

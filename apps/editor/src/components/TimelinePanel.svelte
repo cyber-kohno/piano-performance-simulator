@@ -2,7 +2,7 @@
   import { onDestroy } from 'svelte';
   import { getLocatedVoiceElements, getNoteValueLabel, getNoteValueSixteenths, type ScoreProject } from '../model/project';
   import type { OutlineCursor } from '../state/outline-cursor';
-  import { getDiatonicPitchClasses, getLocatedTimelineNotes, isTimelinePlacementInvalid, type TimelineCursor } from '../state/timeline-cursor';
+  import { getDiatonicPitchClasses, getLocatedTimelineNotes, getSelectedTimelineNotes, isTimelinePlacementInvalid, type TimelineCursor } from '../state/timeline-cursor';
 
   let { outline, cursor, timelineCursor, mode }: {
     outline: ScoreProject['outline'];
@@ -72,6 +72,7 @@
   const pixelsPerQuarter = 120;
   const pixelsPerWhole = pixelsPerQuarter * 4;
   const pixelsPerSixteenth = pixelsPerWhole / 16;
+  const independentNoteGapPixels = 4;
   const pitchTopMargin = 60;
   const pitchRowHeight = 24;
   const cursorLineWidth = 10;
@@ -82,13 +83,39 @@
     return pitches.find((pitch) => pitch.midi % 12 === pitchClass)?.isDiatonic ?? false;
   }
   const measures = $derived(outline.filter((block) => block.type === 'measure'));
-  const measureNotes = $derived(measures.map((measure) => {
-    const voice = measure.data.upperStaff.voices[0];
-    return voice ? getLocatedVoiceElements(voice, measure.data.length).flatMap((entry) =>
-      entry.element.kind === 'note' ? [{ note: entry.element, position: entry.positionSixteenths, length: entry.lengthSixteenths }] : [],
-    ) : [];
-  }));
-  const locatedNotes = $derived(getLocatedTimelineNotes(outline));
+  const staffNames = ['upperStaff', 'lowerStaff'] as const;
+  const staffNotes = $derived(staffNames.map((staff) => getLocatedTimelineNotes(outline, staff)));
+  const locatedNotes = $derived(staffNotes[timelineCursor.staff === 'upperStaff' ? 0 : 1]);
+  const selectedNotes = $derived(getSelectedTimelineNotes(outline, timelineCursor));
+  const selectedNoteIds = $derived(new Set(selectedNotes.map(({ note }) => note.id)));
+  const notesWithVisualGap = $derived.by(() => {
+    const gaps = new Set<string>();
+    for (const notes of staffNotes) {
+      for (let index = 0; index + 1 < notes.length; index += 1) {
+        const current = notes[index];
+        const next = notes[index + 1];
+        const currentEnd = current.measureStartSixteenths + current.positionSixteenths +
+          getNoteValueSixteenths(current.note.value);
+        const nextStart = next.measureStartSixteenths + next.positionSixteenths;
+        const isTied = current.note.tieTo === next.note.id && next.note.tieFrom === current.note.id;
+        if (Math.abs(currentEnd - nextStart) < 1e-8 && !isTied) gaps.add(current.note.id);
+      }
+    }
+    return gaps;
+  });
+  const measureNotes = $derived(measures.map((measure) => staffNames
+    .flatMap((staff) => {
+      const voice = measure.data[staff].voices[0];
+      return voice ? getLocatedVoiceElements(voice, measure.data.length).flatMap((entry) =>
+        entry.element.kind === 'note' ? [{
+          note: entry.element,
+          staff,
+          position: entry.positionSixteenths,
+          length: entry.lengthSixteenths,
+          displayLength: entry.lengthSixteenths - (notesWithVisualGap.has(entry.element.id) ? independentNoteGapPixels / pixelsPerSixteenth : 0),
+        }] : [],
+      ) : [];
+    })));
   const focusedNote = $derived(locatedNotes.find(({ note }) => note.id === timelineCursor.focusedNoteId));
   const tiePaths = $derived.by(() => {
     const notes = locatedNotes;
@@ -337,9 +364,11 @@
           {/each}
           {#each measureNotes[index] as entry (entry.note.id)}
             {@const note = entry.note}
-            {#if mode === 'timeline' && timelineCursor.focusedNoteId === note.id}
+            {#if mode === 'timeline' && entry.staff === timelineCursor.staff && selectedNoteIds.has(note.id)}
               <div
                 class="note-focus-column"
+                class:range-selected={selectedNotes.length > 1}
+                class:range-endpoint={selectedNotes.length > 1 && timelineCursor.focusedNoteId === note.id}
                 style={`left: ${entry.position * pixelsPerSixteenth}px; width: ${entry.length * pixelsPerSixteenth}px`}
                 aria-hidden="true"
               ></div>
@@ -347,18 +376,20 @@
             {#each note.pitches as pitch, pitchIndex (`${note.id}-${pitch.midi}`)}
               <div
                 class="score-note-pitch"
+                class:inactive={mode === 'outline' || entry.staff !== timelineCursor.staff}
+                class:lower-staff={entry.staff === 'lowerStaff'}
                 class:diatonic={isDiatonicMidi(pitch.midi)}
                 class:chromatic={!isDiatonicMidi(pitch.midi)}
-                class:unselected={mode === 'timeline' && timelineCursor.focusedNoteId === note.id && timelineCursor.focusedPitchIndex !== pitchIndex}
-                aria-label={`Note ${note.id}`}
-                aria-current={mode === 'timeline' && timelineCursor.focusedNoteId === note.id && timelineCursor.focusedPitchIndex === pitchIndex ? 'true' : undefined}
-                style={`left: ${entry.position * pixelsPerSixteenth}px; top: ${pitchTopMargin + (108 - pitch.midi) * pitchRowHeight}px; width: ${entry.length * pixelsPerSixteenth}px`}
+                class:unselected={mode === 'timeline' && entry.staff === timelineCursor.staff && selectedNotes.length <= 1 && timelineCursor.focusedNoteId === note.id && timelineCursor.focusedPitchIndex !== pitchIndex}
+                aria-label={`${entry.staff === 'upperStaff' ? 'Upper' : 'Lower'} staff note ${note.id}`}
+                aria-current={mode === 'timeline' && entry.staff === timelineCursor.staff && timelineCursor.focusedNoteId === note.id && timelineCursor.focusedPitchIndex === pitchIndex ? 'true' : undefined}
+                style={`left: ${entry.position * pixelsPerSixteenth}px; top: ${pitchTopMargin + (108 - pitch.midi) * pitchRowHeight}px; width: ${entry.displayLength * pixelsPerSixteenth}px`}
               ></div>
             {/each}
           {/each}
         </div>
       {/each}
-      {#if tiePaths.length > 0}
+      {#if mode === 'timeline' && tiePaths.length > 0}
         <svg class="tie-links" width="100%" height="100%" aria-hidden="true">
           {#each tiePaths as tie (tie.id)}
             <path d={tie.path}></path>
@@ -555,7 +586,7 @@
 
   .timeline-cursor {
     position: absolute;
-    z-index: 4;
+    z-index: 8;
     top: 0;
     bottom: 0;
     width: 0;
@@ -589,7 +620,7 @@
     position: absolute;
     top: -52px;
     left: 4px;
-    z-index: 2;
+    z-index: 9;
     padding: 0 6px;
     border-radius: 4px;
     background: rgba(75, 0, 0, 0.7);
@@ -601,7 +632,7 @@
   }
 
   .note-focused-value-badge {
-    z-index: 6;
+    z-index: 9;
     display: flex;
     gap: 10px;
   }
@@ -612,7 +643,7 @@
 
   .tie-links {
     position: absolute;
-    z-index: 5;
+    z-index: 7;
     top: 0;
     left: 0;
     overflow: visible;
@@ -665,6 +696,23 @@
     background: linear-gradient(#d8c3a1, #ab8a61);
   }
 
+  .score-note-pitch.inactive {
+    height: calc(var(--pitch-row-height) / 2);
+    margin-top: calc(var(--pitch-row-height) / 4);
+    border: 0;
+    border-radius: 0;
+    background: linear-gradient(to bottom, rgb(0, 0, 100), rgb(60, 60, 165) 50%, rgb(0, 0, 100));
+    opacity: 0.8;
+  }
+
+  .score-note-pitch.inactive.lower-staff {
+    background: linear-gradient(to bottom, rgb(100, 0, 0), rgb(165, 60, 60) 50%, rgb(100, 0, 0));
+  }
+
+  .score-note-pitch:not(.inactive) {
+    z-index: 6;
+  }
+
   .note-focus-column {
     position: absolute;
     z-index: 2;
@@ -672,6 +720,14 @@
     bottom: var(--pitch-bottom-margin);
     background: rgba(255, 242, 0, 0.121);
     pointer-events: none;
+  }
+
+  .note-focus-column.range-selected {
+    background: rgba(239, 68, 68, 0.23);
+  }
+
+  .note-focus-column.range-endpoint {
+    border-left: 2px solid #b42323;
   }
 
   .roll-gridline {

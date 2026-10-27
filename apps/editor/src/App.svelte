@@ -11,6 +11,7 @@
     toggleFocusedTimelineNoteDot,
     moveFocusedTimelineNote,
     appendFocusedTimelineTie,
+    duplicateFocusedTimelineNoteAfter,
     resizeFocusedTimelineTie,
     addTimelineNoteAt,
     findTimelineNoteAtMove,
@@ -25,6 +26,13 @@
     selectFocusedNotePitch,
     deleteFocusedTimelineNote,
     focusAdjacentTimelineNote,
+    toggleTieToAdjacentTimelineNote,
+    getSelectedTimelineNotes,
+    extendTimelineNoteSelection,
+    collapseTimelineNoteSelection,
+    transposeSelectedTimelineNotes,
+    resetTimelineCursorForStaff,
+    switchTimelineStaff,
   } from './state/timeline-cursor';
   import {
     addMeasureAfterCursor,
@@ -41,6 +49,7 @@
   let timelineCursor = $state(createTimelineCursor());
   let mode = $state<'outline' | 'timeline'>('outline');
   const keyHold = createKeyHold();
+  const selectedTimelineNotes = $derived(getSelectedTimelineNotes(project.outline, timelineCursor));
 
   const pitchClassNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 
@@ -77,9 +86,11 @@
     const isAddMeasureKey = event.key.toLowerCase() === 'a';
     const isAddSectionKey = event.key.toLowerCase() === 's';
     const isDeleteKey = event.key === 'Delete';
+    const isEscapeKey = mode === 'timeline' && event.key === 'Escape';
+    const isToggleAdjacentTieKey = mode === 'timeline' && (event.key === '=' || event.code === 'Equal');
     const isCursorUnitKey = mode === 'timeline' && TIMELINE_CURSOR_UNITS.some((unit) => unit.key === event.key);
     const isDotKey = mode === 'timeline' && event.key === '.';
-    if (!isToggleModeKey && !isMoveKey && !isMoveSectionKey && !isAddMeasureKey && !isAddSectionKey && !isDeleteKey && !isCursorUnitKey && !isDotKey) return;
+    if (!isToggleModeKey && !isMoveKey && !isMoveSectionKey && !isAddMeasureKey && !isAddSectionKey && !isDeleteKey && !isCursorUnitKey && !isDotKey && !isToggleAdjacentTieKey && !isEscapeKey) return;
 
     const target = event.target;
     if (target instanceof HTMLElement && (
@@ -87,7 +98,50 @@
     )) return;
 
     event.preventDefault();
-    if (keyHold.noteValueEditing && !keyHold.pitchSelection && !event.shiftKey) {
+    if (isToggleModeKey && (keyHold.rangeSelection || event.shiftKey)) {
+      if (mode === 'timeline' && !event.repeat) {
+        timelineCursor = switchTimelineStaff(project.outline, timelineCursor);
+        syncOutlineToTimelinePosition(timelineCursor.positionSixteenths);
+      }
+      return;
+    }
+    if (isToggleModeKey && event.repeat) return;
+    if (isEscapeKey) {
+      timelineCursor = {
+        ...timelineCursor, selectionAnchorNoteId: null,
+        focusedPitchIndex: selectedTimelineNotes.length > 1 ? 0 : timelineCursor.focusedPitchIndex,
+      };
+      return;
+    }
+    if ((keyHold.rangeSelection || event.shiftKey) && isMoveSectionKey) {
+      if (mode === 'timeline') {
+        timelineCursor = extendTimelineNoteSelection(project.outline, timelineCursor, event.key === 'ArrowLeft' ? -1 : 1);
+        syncOutlineToTimelinePosition(timelineCursor.positionSixteenths);
+      }
+      return;
+    }
+    if (selectedTimelineNotes.length > 1) {
+      if (isMoveKey) {
+        const result = transposeSelectedTimelineNotes(project, timelineCursor, event.key === 'ArrowUp' ? 1 : -1);
+        if (result) {
+          project = result.project;
+          timelineCursor = result.cursor;
+        }
+        return;
+      }
+      const plain = !keyHold.noteValueEditing && !keyHold.notePositionEditing &&
+        !keyHold.diatonicMovement && !keyHold.pitchSelection;
+      const navigation = isMoveSectionKey && (plain || keyHold.noteNavigation);
+      const rangeMove = isMoveSectionKey && keyHold.notePositionEditing && !keyHold.noteValueEditing && !keyHold.pitchSelection;
+      // Other editing commands require returning to a single focused note first.
+      if (!navigation && !rangeMove && !(plain && (isDeleteKey || isToggleModeKey || isCursorUnitKey))) return;
+    }
+    if (isToggleAdjacentTieKey) {
+      const nextProject = toggleTieToAdjacentTimelineNote(project, timelineCursor);
+      if (nextProject) project = nextProject;
+      return;
+    }
+    if (keyHold.noteValueEditing && !keyHold.pitchSelection) {
       if (mode !== 'timeline') return;
       const result = isMoveSectionKey ? resizeFocusedTimelineTie(project, timelineCursor, event.key === 'ArrowLeft' ? -1 : 1)
         : isAddMeasureKey ? appendFocusedTimelineTie(project, timelineCursor)
@@ -100,8 +154,10 @@
       }
       return;
     }
-    if (keyHold.notePositionEditing && !keyHold.pitchSelection && !event.shiftKey) {
-      const result = mode === 'timeline' && isMoveSectionKey
+    if (keyHold.notePositionEditing && !keyHold.pitchSelection) {
+      const result = mode === 'timeline' && isAddMeasureKey
+        ? duplicateFocusedTimelineNoteAfter(project, timelineCursor)
+        : mode === 'timeline' && isMoveSectionKey
         ? moveFocusedTimelineNote(project, timelineCursor, event.key === 'ArrowLeft' ? -1 : 1)
         : undefined;
       if (result) {
@@ -111,13 +167,13 @@
       }
       return;
     }
-    // Shift retains pitch-selection priority; C alone only enables pitch movement.
-    if (keyHold.diatonicMovement && !keyHold.pitchSelection && !event.shiftKey) {
+    // E pitch editing takes priority over scale-constrained movement.
+    if (keyHold.diatonicMovement && !keyHold.pitchSelection) {
       if (mode === 'timeline' && isMoveKey) movePitch(event.key === 'ArrowUp' ? 1 : -1, true);
       return;
     }
-    if (keyHold.noteNavigation && !keyHold.pitchSelection && !event.shiftKey) {
-      if (mode === 'timeline' && isMoveSectionKey) {
+    if (keyHold.noteNavigation && isMoveSectionKey) {
+      if (mode === 'timeline') {
         timelineCursor = focusAdjacentTimelineNote(
           project.outline, timelineCursor, event.key === 'ArrowLeft' ? -1 : 1,
         );
@@ -127,7 +183,7 @@
     }
     if (isDeleteKey) {
       if (mode === 'outline') {
-        if (keyHold.pitchSelection || event.shiftKey) return;
+        if (keyHold.pitchSelection) return;
         const result = deleteOutlineBlock(project.outline, outlineCursor);
         if (result.outline !== project.outline) {
           project = { ...project, outline: result.outline };
@@ -137,11 +193,12 @@
             positionSixteenths: getOutlinePositionSixteenths(project.outline, outlineCursor.blockId),
             focusedNoteId: null,
             focusedPitchIndex: null,
+            selectionAnchorNoteId: null,
           };
         }
         return;
       }
-      const result = deleteFocusedTimelineNote(project, timelineCursor, keyHold.pitchSelection || event.shiftKey);
+      const result = deleteFocusedTimelineNote(project, timelineCursor, keyHold.pitchSelection);
       if (result) {
         project = result.project;
         timelineCursor = result.cursor;
@@ -149,7 +206,7 @@
       }
       return;
     }
-    if (keyHold.pitchSelection || event.shiftKey) {
+    if (keyHold.pitchSelection) {
       if (mode !== 'timeline' || timelineCursor.focusedNoteId === null) return;
       if (isAddMeasureKey) {
         const result = addFocusedNotePitch(project, timelineCursor);
@@ -167,16 +224,14 @@
     if (isToggleModeKey) {
       if (mode === 'outline') {
         const positionSixteenths = getOutlinePositionSixteenths(project.outline, outlineCursor.blockId);
-        timelineCursor = {
-          ...timelineCursor,
-          positionSixteenths,
-          focusedNoteId: null,
-          focusedPitchIndex: null,
-        };
+        timelineCursor = resetTimelineCursorForStaff(
+          project.outline, { ...timelineCursor, positionSixteenths }, 'upperStaff',
+        );
         const block = getOutlineBlockAtPosition(project.outline, positionSixteenths);
         if (block) outlineCursor = { blockId: block.id };
         mode = 'timeline';
       } else {
+        timelineCursor = { ...timelineCursor, selectionAnchorNoteId: null };
         mode = 'outline';
       }
       return;
@@ -187,7 +242,7 @@
         timelineCursor = setTimelineCursorUnit(timelineCursor, event.key);
       } else if (event.key.toLowerCase() === 'a') {
         const focusedNote = timelineCursor.focusedNoteId
-          ? getLocatedTimelineNote(project.outline, timelineCursor.focusedNoteId)
+          ? getLocatedTimelineNote(project.outline, timelineCursor.focusedNoteId, timelineCursor.staff)
           : undefined;
         const noteEndPosition = focusedNote
           ? focusedNote.measureStartSixteenths + focusedNote.positionSixteenths +
@@ -202,8 +257,13 @@
         }
       } else if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
         const direction = event.key === 'ArrowLeft' ? -1 : 1;
+        if (timelineCursor.selectionAnchorNoteId !== null) {
+          timelineCursor = collapseTimelineNoteSelection(project.outline, timelineCursor, direction);
+          syncOutlineToTimelinePosition(timelineCursor.positionSixteenths);
+          return;
+        }
         const focusedNote = timelineCursor.focusedNoteId
-          ? getLocatedTimelineNote(project.outline, timelineCursor.focusedNoteId)
+          ? getLocatedTimelineNote(project.outline, timelineCursor.focusedNoteId, timelineCursor.staff)
           : undefined;
 
         if (focusedNote) {
@@ -218,6 +278,7 @@
             positionSixteenths: targetPosition,
             focusedNoteId: null,
             focusedPitchIndex: null,
+            selectionAnchorNoteId: null,
           };
           syncOutlineToTimelinePosition(targetPosition);
         } else {
@@ -229,6 +290,7 @@
               pitch: collidedNote.note.pitches[0]?.midi ?? timelineCursor.pitch,
               focusedNoteId: collidedNote.note.id,
               focusedPitchIndex: 0,
+              selectionAnchorNoteId: null,
             };
             syncOutlineToTimelinePosition(timelineCursor.positionSixteenths);
           } else {
@@ -288,9 +350,12 @@
       <span class:active={mode === 'timeline'}>Timeline</span>
     </div>
     <p class="editing-target">
-      Upper staff <span>/</span> Voice 0
+      {mode === 'outline' ? 'Both staves' : timelineCursor.staff === 'upperStaff' ? 'Upper staff' : 'Lower staff'} <span>/</span> Voice 0
       {#if mode === 'timeline'}
         <span>/</span> {formatPitch(timelineCursor.pitch)}
+        {#if selectedTimelineNotes.length > 1}
+          <span>/</span> {selectedTimelineNotes.length} notes selected
+        {/if}
       {/if}
     </p>
   </header>

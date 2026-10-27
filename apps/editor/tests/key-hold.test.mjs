@@ -31,8 +31,10 @@ test('hold lifecycle handles both Shift keys, focus loss, missed releases and di
     };
     key('keydown', 'KeyE', false);
     assert.equal(hold.noteNavigation, true);
+    assert.equal(hold.pitchSelection, true);
     key('keyup', 'KeyE', false);
     assert.equal(hold.noteNavigation, false);
+    assert.equal(hold.pitchSelection, false);
     key('keydown', 'KeyF', false);
     assert.equal(hold.noteValueEditing, true);
     key('keyup', 'KeyF', false);
@@ -42,7 +44,8 @@ test('hold lifecycle handles both Shift keys, focus loss, missed releases and di
     key('keyup', 'KeyD', false);
     assert.equal(hold.notePositionEditing, false);
     key('keydown', 'ShiftLeft', true);
-    assert.equal(hold.pitchSelection, true);
+    assert.equal(hold.rangeSelection, true);
+    assert.equal(hold.pitchSelection, false);
     key('keydown', 'KeyC', true);
     assert.equal(hold.diatonicMovement, true);
     key('keyup', 'KeyC', true);
@@ -50,15 +53,16 @@ test('hold lifecycle handles both Shift keys, focus loss, missed releases and di
     key('keydown', 'ShiftLeft', true); // repeats must not require extra releases
     key('keydown', 'ShiftRight', true);
     key('keyup', 'ShiftLeft', true);
-    assert.equal(hold.pitchSelection, true);
+    assert.equal(hold.rangeSelection, true);
     key('keyup', 'ShiftRight', false);
-    assert.equal(hold.pitchSelection, false);
+    assert.equal(hold.rangeSelection, false);
     key('keydown', 'ShiftLeft', true);
     key('keydown', 'KeyC', true);
     key('keydown', 'KeyE', true);
     key('keydown', 'KeyF', true);
     key('keydown', 'KeyD', true);
     window.dispatchEvent(new Event('blur'));
+    assert.equal(hold.rangeSelection, false);
     assert.equal(hold.pitchSelection, false);
     assert.equal(hold.diatonicMovement, false);
     assert.equal(hold.noteNavigation, false);
@@ -71,6 +75,7 @@ test('hold lifecycle handles both Shift keys, focus loss, missed releases and di
     key('keydown', 'KeyD', true);
     document.hidden = true;
     document.dispatchEvent(new Event('visibilitychange'));
+    assert.equal(hold.rangeSelection, false);
     assert.equal(hold.pitchSelection, false);
     assert.equal(hold.diatonicMovement, false);
     assert.equal(hold.noteNavigation, false);
@@ -78,9 +83,11 @@ test('hold lifecycle handles both Shift keys, focus loss, missed releases and di
     assert.equal(hold.notePositionEditing, false);
     key('keydown', 'ShiftLeft', true);
     key('keydown', 'KeyA', false);
+    assert.equal(hold.rangeSelection, false);
     assert.equal(hold.pitchSelection, false);
     key('keydown', 'ShiftLeft', true);
     dispose();
+    assert.equal(hold.rangeSelection, false);
     assert.equal(hold.pitchSelection, false);
     key('keydown', 'ShiftLeft', true);
     assert.equal(hold.pitchSelection, false);
