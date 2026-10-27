@@ -95,7 +95,7 @@ test('staff note positions derive independently from each staff’s saved rest s
   assertComplete(state.project);
 });
 
-test('staff switches reset to the current measure head, quarter input and fixed C4/C3 without selection', () => {
+test('staff switches retain cursor position and input value, resetting pitch and selection only', () => {
   const project = blankProject(2, { cnt: 3, unit: 4 });
   project.outline[0].data.timeSignature = { cnt: 6, unit: 8 };
   const cursor = {
@@ -104,22 +104,47 @@ test('staff switches reset to the current measure head, quarter input and fixed 
   };
   const lower = switchTimelineStaff(project.outline, cursor);
   assert.equal(lower.staff, 'lowerStaff');
-  assert.equal(lower.positionSixteenths, 12);
+  assert.equal(lower.positionSixteenths, 19);
   assert.equal(lower.pitch, 48);
-  assert.deepEqual(lower.placementValue, { type: 'quarter', dots: 0 });
+  assert.deepEqual(lower.placementValue, cursor.placementValue);
   assert.equal(lower.focusedNoteId, null);
   assert.equal(lower.focusedPitchIndex, null);
   assert.equal(lower.selectionAnchorNoteId, null);
   const upper = switchTimelineStaff(project.outline, { ...lower, positionSixteenths: 22, pitch: 21 });
   assert.equal(upper.staff, 'upperStaff');
   assert.equal(upper.pitch, 60);
-  assert.equal(upper.positionSixteenths, 12);
-  assert.deepEqual(upper.placementValue, { type: 'quarter', dots: 0 });
+  assert.equal(upper.positionSixteenths, 22);
+  assert.deepEqual(upper.placementValue, cursor.placementValue);
   const reentered = resetTimelineCursorForStaff(project.outline, {
     ...lower, positionSixteenths: 19, placementValue: { type: 'eighth', dots: 0 },
   }, 'upperStaff');
-  assert.deepEqual(reentered, upper);
+  assert.equal(reentered.positionSixteenths, 12);
+  assert.deepEqual(reentered.placementValue, { type: 'quarter', dots: 0 });
+  assert.equal(reentered.staff, 'upperStaff');
+  assert.equal(reentered.pitch, 60);
+  assert.equal(reentered.focusedNoteId, null);
   assert.equal(switchTimelineStaff(blankProject(0).outline, createTimelineCursor()).pitch, 48);
+});
+
+test('staff switching from a focused note or range uses the endpoint onset and retains the input value', () => {
+  const placed = addTimelineNoteAt(blankProject(2), createTimelineCursor(), 19, 72);
+  const cursor = {
+    ...placed.cursor, positionSixteenths: 23, voiceIndex: 2,
+    placementValue: { type: 'eighth', dots: 0 }, selectionAnchorNoteId: placed.cursor.focusedNoteId,
+  };
+  const before = structuredClone(placed.project);
+  const lower = switchTimelineStaff(placed.project.outline, cursor);
+  assert.equal(lower.positionSixteenths, 19);
+  assert.deepEqual(lower.placementValue, cursor.placementValue);
+  assert.equal(lower.pitch, 48);
+  assert.equal(lower.voiceIndex, 0);
+  assert.equal(lower.focusedNoteId, null);
+  assert.equal(lower.selectionAnchorNoteId, null);
+  assert.deepEqual(placed.project, before);
+  const upper = switchTimelineStaff(placed.project.outline, lower);
+  assert.equal(upper.positionSixteenths, 19);
+  assert.deepEqual(upper.placementValue, cursor.placementValue);
+  assert.equal(upper.pitch, 60);
 });
 
 test('lower staff chord, value, tie, duplication, movement and deletion edits leave overlapping upper notes intact', () => {

@@ -1,0 +1,3 @@
+allowBuilds:
+  gl: false
+storeDir: node_modules/.pnpm-store

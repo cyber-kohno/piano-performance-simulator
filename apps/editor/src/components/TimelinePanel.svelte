@@ -1,8 +1,9 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
+  import ScorePreview from './ScorePreview.svelte';
   import { getLocatedVoiceElements, getNoteValueLabel, getNoteValueSixteenths, type ScoreProject } from '../model/project';
   import type { OutlineCursor } from '../state/outline-cursor';
-  import { getDiatonicPitchClasses, getLocatedTimelineNotes, getSelectedTimelineNotes, isTimelinePlacementInvalid, type TimelineCursor } from '../state/timeline-cursor';
+  import { getDiatonicPitchClasses, getLocatedTimelineNotes, getSelectedTimelineNotes, getMeasureAtPosition, getOutlinePositionSixteenths, isTimelinePlacementInvalid, type TimelineCursor } from '../state/timeline-cursor';
 
   let { outline, cursor, timelineCursor, mode }: {
     outline: ScoreProject['outline'];
@@ -83,9 +84,15 @@
     return pitches.find((pitch) => pitch.midi % 12 === pitchClass)?.isDiatonic ?? false;
   }
   const measures = $derived(outline.filter((block) => block.type === 'measure'));
+  const statusMeasure = $derived(getMeasureAtPosition(outline, mode === 'timeline'
+    ? timelineCursor.positionSixteenths : getOutlinePositionSixteenths(outline, cursor.blockId))?.measure);
+  const statusMeasureNumber = $derived(statusMeasure ? measures.findIndex((measure) => measure.id === statusMeasure.id) + 1 : null);
   const staffNames = ['upperStaff', 'lowerStaff'] as const;
-  const staffNotes = $derived(staffNames.map((staff) => getLocatedTimelineNotes(outline, staff)));
-  const locatedNotes = $derived(staffNotes[timelineCursor.staff === 'upperStaff' ? 0 : 1]);
+  const staffNotes = $derived(staffNames.flatMap((staff) => {
+    const count = Math.max(0, ...measures.map((measure) => measure.data[staff].voices.length));
+    return Array.from({ length: count }, (_, index) => getLocatedTimelineNotes(outline, staff, index));
+  }));
+  const locatedNotes = $derived(getLocatedTimelineNotes(outline, timelineCursor.staff, timelineCursor.voiceIndex));
   const selectedNotes = $derived(getSelectedTimelineNotes(outline, timelineCursor));
   const selectedNoteIds = $derived(new Set(selectedNotes.map(({ note }) => note.id)));
   const notesWithVisualGap = $derived.by(() => {
@@ -105,16 +112,16 @@
   });
   const measureNotes = $derived(measures.map((measure) => staffNames
     .flatMap((staff) => {
-      const voice = measure.data[staff].voices[0];
-      return voice ? getLocatedVoiceElements(voice, measure.data.length).flatMap((entry) =>
+      return measure.data[staff].voices.flatMap((voice, voiceIndex) => getLocatedVoiceElements(voice, measure.data.length).flatMap((entry) =>
         entry.element.kind === 'note' ? [{
           note: entry.element,
           staff,
+          voiceIndex,
           position: entry.positionSixteenths,
           length: entry.lengthSixteenths,
           displayLength: entry.lengthSixteenths - (notesWithVisualGap.has(entry.element.id) ? independentNoteGapPixels / pixelsPerSixteenth : 0),
         }] : [],
-      ) : [];
+      ));
     })));
   const focusedNote = $derived(locatedNotes.find(({ note }) => note.id === timelineCursor.focusedNoteId));
   const tiePaths = $derived.by(() => {
@@ -309,12 +316,15 @@
           <div
             class="timeline-cursor-note"
             style={`top: ${pitchTopMargin + (108 - timelineCursor.pitch) * pitchRowHeight}px; width: ${Math.max(0, cursorWidth - cursorLineWidth)}px`}
-          >
-            <span class="note-value-badge">
-              Input {getNoteValueLabel(timelineCursor.placementValue)}
-            </span>
-          </div>
+          ></div>
         </div>
+        <span
+          class="note-value-badge"
+          style={`left: ${timelineCursor.positionSixteenths * pixelsPerSixteenth + cursorLineWidth + 4}px; top: ${pitchTopMargin + (108 - timelineCursor.pitch) * pitchRowHeight - 52}px`}
+          aria-hidden="true"
+        >
+          Input {getNoteValueLabel(timelineCursor.placementValue)}
+        </span>
       {/if}
       {#if mode === 'timeline' && focusedNote}
         <span
@@ -376,7 +386,8 @@
             {#each note.pitches as pitch, pitchIndex (`${note.id}-${pitch.midi}`)}
               <div
                 class="score-note-pitch"
-                class:inactive={mode === 'outline' || entry.staff !== timelineCursor.staff}
+                class:inactive={mode === 'outline' || entry.staff !== timelineCursor.staff || entry.voiceIndex !== timelineCursor.voiceIndex}
+                class:timeline-inactive={mode === 'timeline' && (entry.staff !== timelineCursor.staff || entry.voiceIndex !== timelineCursor.voiceIndex)}
                 class:lower-staff={entry.staff === 'lowerStaff'}
                 class:diatonic={isDiatonicMidi(pitch.midi)}
                 class:chromatic={!isDiatonicMidi(pitch.midi)}
@@ -387,6 +398,9 @@
               ></div>
             {/each}
           {/each}
+          {#if mode === 'timeline' && timelineCursor.voiceIndex > 0 && !measure.data[timelineCursor.staff].voices[timelineCursor.voiceIndex]}
+            <div class="missing-voice-blind" aria-hidden="true"></div>
+          {/if}
         </div>
       {/each}
       {#if mode === 'timeline' && tiePaths.length > 0}
@@ -398,6 +412,24 @@
       {/if}
     </div>
   </section>
+  {#if mode === 'timeline'}
+  <aside class="selection-status" aria-label="Current measure, staff and voice">
+    <div class="selection-status-measure">Measure {statusMeasureNumber ?? '—'}</div>
+    {#each staffNames as staff (staff)}
+      {@const active = mode === 'timeline' && timelineCursor.staff === staff}
+      <div class="selection-status-row" class:upper={staff === 'upperStaff'} class:lower={staff === 'lowerStaff'} class:active>
+        <span class="selection-status-staff" class:active aria-current={active ? 'true' : undefined}>
+          {staff === 'upperStaff' ? 'Upper' : 'Lower'}
+        </span>
+        {#each statusMeasure?.data[staff].voices ?? [] as voice, index (voice.id)}
+          <span class="selection-status-voice" class:active={active && timelineCursor.voiceIndex === index}
+            aria-current={active && timelineCursor.voiceIndex === index ? 'true' : undefined}>{index + 1}</span>
+        {/each}
+      </div>
+    {/each}
+  </aside>
+    <ScorePreview {outline} activeIndex={(statusMeasureNumber ?? 0) - 1} />
+  {/if}
 </section>
 
 <style>
@@ -552,12 +584,87 @@
   }
 
   .piano-roll {
+    grid-column: 2;
+    grid-row: 2;
     position: relative;
     min-width: 0;
     min-height: 0;
     overflow: hidden;
     background: #edf0df;
     container-type: inline-size;
+  }
+
+  .selection-status {
+    box-sizing: border-box;
+    width: 170px;
+    grid-column: 2;
+    grid-row: 2;
+    position: relative;
+    z-index: 20;
+    align-self: start;
+    justify-self: start;
+    margin: 8px;
+    padding: 5px;
+    border: 1px solid #899ca2;
+    border-radius: 4px;
+    background: rgba(242, 247, 245, 0.95);
+    color: #354c55;
+    font-size: 12px;
+    line-height: 20px;
+    pointer-events: none;
+  }
+
+  .selection-status-measure {
+    padding: 0 5px 3px;
+    font-weight: 600;
+  }
+
+  .selection-status-row {
+    display: flex;
+    gap: 3px;
+    margin-top: 2px;
+    padding: 2px 0;
+  }
+
+  .selection-status-staff,
+  .selection-status-voice {
+    padding: 0 5px;
+    border-radius: 2px;
+  }
+
+  .selection-status-voice {
+    min-width: 20px;
+    text-align: center;
+  }
+
+  .selection-status-staff {
+    min-width: 45px;
+  }
+
+  .selection-status-row.upper {
+    color: #244b88;
+  }
+
+  .selection-status-row.lower {
+    color: #963e3e;
+  }
+
+  .selection-status-row.upper.active {
+    background: rgba(0, 0, 100, 0.6);
+  }
+
+  .selection-status-row.lower.active {
+    background: rgba(100, 0, 0, 0.6);
+  }
+
+  .selection-status-row.active {
+    color: #fff;
+    font-weight: 700;
+  }
+
+  .selection-status-voice.active {
+    background: rgba(255, 241, 173, 0.5);
+    /* color: #453d20; */
   }
 
   .measure-track {
@@ -586,7 +693,7 @@
 
   .timeline-cursor {
     position: absolute;
-    z-index: 8;
+    z-index: 4;
     top: 0;
     bottom: 0;
     width: 0;
@@ -629,6 +736,7 @@
     font-weight: 600;
     line-height: 24px;
     white-space: nowrap;
+    pointer-events: none;
   }
 
   .note-focused-value-badge {
@@ -660,6 +768,15 @@
     flex: 0 0 auto;
   }
 
+  .missing-voice-blind {
+    position: absolute;
+    inset: 0;
+    z-index: 8;
+    background: #000;
+    opacity: 0.4;
+    pointer-events: none;
+  }
+
   .pitch-lane {
     flex: 0 0 var(--pitch-row-height);
     height: var(--pitch-row-height);
@@ -667,11 +784,11 @@
   }
 
   .pitch-lane.diatonic {
-    background: #dce9dc;
+    background: #f2f2f2;
   }
 
   .pitch-lane.chromatic {
-    background: #e5dfd7;
+    background: #e4e4e4;
   }
 
   .score-note-pitch {
@@ -707,6 +824,10 @@
 
   .score-note-pitch.inactive.lower-staff {
     background: linear-gradient(to bottom, rgb(100, 0, 0), rgb(165, 60, 60) 50%, rgb(100, 0, 0));
+  }
+
+  .score-note-pitch.timeline-inactive {
+    opacity: 0.6;
   }
 
   .score-note-pitch:not(.inactive) {

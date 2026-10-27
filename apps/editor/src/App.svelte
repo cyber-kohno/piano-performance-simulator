@@ -33,6 +33,9 @@
     transposeSelectedTimelineNotes,
     resetTimelineCursorForStaff,
     switchTimelineStaff,
+    cycleTimelineVoice,
+    addNextTimelineVoice,
+    reconcileTimelineCursorVoice,
   } from './state/timeline-cursor';
   import {
     addMeasureAfterCursor,
@@ -58,6 +61,7 @@
   }
 
   function syncOutlineToTimelinePosition(positionSixteenths: number) {
+    timelineCursor = reconcileTimelineCursorVoice(project.outline, timelineCursor);
     const block = getOutlineBlockAtPosition(project.outline, positionSixteenths);
     if (block && block.id !== outlineCursor.blockId) outlineCursor = { blockId: block.id };
   }
@@ -81,6 +85,7 @@
       event.altKey || event.ctrlKey || event.metaKey
     ) return;
     const isToggleModeKey = event.key.toLowerCase() === 'r';
+    const isVoiceKey = mode === 'timeline' && event.key.toLowerCase() === 'q';
     const isMoveKey = event.key === 'ArrowUp' || event.key === 'ArrowDown';
     const isMoveSectionKey = event.key === 'ArrowLeft' || event.key === 'ArrowRight';
     const isAddMeasureKey = event.key.toLowerCase() === 'a';
@@ -90,7 +95,7 @@
     const isToggleAdjacentTieKey = mode === 'timeline' && (event.key === '=' || event.code === 'Equal');
     const isCursorUnitKey = mode === 'timeline' && TIMELINE_CURSOR_UNITS.some((unit) => unit.key === event.key);
     const isDotKey = mode === 'timeline' && event.key === '.';
-    if (!isToggleModeKey && !isMoveKey && !isMoveSectionKey && !isAddMeasureKey && !isAddSectionKey && !isDeleteKey && !isCursorUnitKey && !isDotKey && !isToggleAdjacentTieKey && !isEscapeKey) return;
+    if (!isVoiceKey && !isToggleModeKey && !isMoveKey && !isMoveSectionKey && !isAddMeasureKey && !isAddSectionKey && !isDeleteKey && !isCursorUnitKey && !isDotKey && !isToggleAdjacentTieKey && !isEscapeKey) return;
 
     const target = event.target;
     if (target instanceof HTMLElement && (
@@ -98,6 +103,14 @@
     )) return;
 
     event.preventDefault();
+    if (isVoiceKey) {
+      if (keyHold.rangeSelection || event.shiftKey) project = addNextTimelineVoice(project, timelineCursor);
+      else {
+        timelineCursor = cycleTimelineVoice(project.outline, timelineCursor);
+        syncOutlineToTimelinePosition(timelineCursor.positionSixteenths);
+      }
+      return;
+    }
     if (isToggleModeKey && (keyHold.rangeSelection || event.shiftKey)) {
       if (mode === 'timeline' && !event.repeat) {
         timelineCursor = switchTimelineStaff(project.outline, timelineCursor);
@@ -113,7 +126,7 @@
       };
       return;
     }
-    if ((keyHold.rangeSelection || event.shiftKey) && isMoveSectionKey) {
+    if ((keyHold.rangeSelection || event.shiftKey) && isMoveSectionKey && timelineCursor.focusedNoteId !== null) {
       if (mode === 'timeline') {
         timelineCursor = extendTimelineNoteSelection(project.outline, timelineCursor, event.key === 'ArrowLeft' ? -1 : 1);
         syncOutlineToTimelinePosition(timelineCursor.positionSixteenths);
@@ -282,10 +295,13 @@
           };
           syncOutlineToTimelinePosition(targetPosition);
         } else {
-          const collidedNote = findTimelineNoteAtMove(project.outline, timelineCursor, direction);
+          const collidedNote = keyHold.rangeSelection || event.shiftKey
+            ? undefined
+            : findTimelineNoteAtMove(project.outline, timelineCursor, direction);
           if (collidedNote) {
             timelineCursor = {
               ...timelineCursor,
+              voiceIndex: collidedNote.voiceIndex,
               positionSixteenths: collidedNote.measureStartSixteenths + collidedNote.positionSixteenths,
               pitch: collidedNote.note.pitches[0]?.midi ?? timelineCursor.pitch,
               focusedNoteId: collidedNote.note.id,
@@ -350,8 +366,9 @@
       <span class:active={mode === 'timeline'}>Timeline</span>
     </div>
     <p class="editing-target">
-      {mode === 'outline' ? 'Both staves' : timelineCursor.staff === 'upperStaff' ? 'Upper staff' : 'Lower staff'} <span>/</span> Voice 0
+      {mode === 'outline' ? 'Both staves' : timelineCursor.staff === 'upperStaff' ? 'Upper staff' : 'Lower staff'}
       {#if mode === 'timeline'}
+        <span>/</span> Voice {timelineCursor.voiceIndex + 1}
         <span>/</span> {formatPitch(timelineCursor.pitch)}
         {#if selectedTimelineNotes.length > 1}
           <span>/</span> {selectedTimelineNotes.length} notes selected
