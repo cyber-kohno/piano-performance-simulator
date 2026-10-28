@@ -1,6 +1,6 @@
 import {
   createRestElements, createRestId, getLocatedVoiceElements, getNoteValueSixteenths,
-  reconcileOutlineTies,
+  reconcileOutlineTies, isOnEditingGrid,
   type KeySignature, type MeasureBlock, type NoteValue, type OutlineBlock, type PianoNote,
   type PianoVoiceElement, type ScoreProject, type TimeSignature, type PianoStaffName,
 } from '../model/project.ts';
@@ -17,6 +17,7 @@ export const TIMELINE_CURSOR_UNITS = [
   { key: '1', type: '16th' },
   { key: '2', type: 'eighth' },
   { key: '3', type: 'quarter' },
+  { key: '4', type: '32nd' },
 ] as const;
 
 export function getDiatonicPitchClasses(keySignature: KeySignature): Set<number> {
@@ -159,8 +160,15 @@ export function collapseTimelineNoteSelection(
 }
 export function setTimelineCursorUnit(cursor: TimelineCursor, key: string): TimelineCursor {
   const unit = TIMELINE_CURSOR_UNITS.find((unit) => unit.key === key);
-  if (!unit || (cursor.placementValue.type === unit.type && cursor.placementValue.dots === 0)) return cursor;
-  return { ...cursor, placementValue: { type: unit.type, dots: 0 } };
+  if (!unit) return cursor;
+  const dots = unit.type === 'quarter' && cursor.placementValue.type === 'quarter' ? cursor.placementValue.dots : 0;
+  if (cursor.placementValue.type === unit.type && cursor.placementValue.dots === dots) return cursor;
+  return { ...cursor, placementValue: { type: unit.type, dots } };
+}
+
+export function toggleTimelineCursorDot(cursor: TimelineCursor): TimelineCursor {
+  if (cursor.placementValue.type !== 'quarter') return cursor;
+  return { ...cursor, placementValue: { ...cursor.placementValue, dots: cursor.placementValue.dots > 0 ? 0 : 1 } };
 }
 export function getTimelineLengthSixteenths(outline: readonly OutlineBlock[]): number {
   return outline.reduce((sum, block) => sum + (block.type === 'measure' ? block.data.length.cnt / block.data.length.unit * 16 : 0), 0);
@@ -365,9 +373,9 @@ export function findTimelineNoteAtMove(outline: readonly OutlineBlock[], cursor:
 }
 
 function getPlacementRest(outline: readonly OutlineBlock[], position: number, value: NoteValue, staff: PianoStaffName, voiceIndex: number) {
-  if (!Number.isInteger(position) || position < 0) return undefined;
+  if (!isOnEditingGrid(position) || position < 0) return undefined;
   const length = getNoteValueSixteenths(value);
-  if (!Number.isInteger(length) || length < 1) return undefined;
+  if (!isOnEditingGrid(length) || length < 0.5) return undefined;
   const location = getMeasureAtPosition(outline, position);
   if (!location) return undefined;
   const local = position - location.startSixteenths;
@@ -519,8 +527,8 @@ export function setFocusedTimelineNoteValue(
   const staff = cursor.staff;
   if (cursor.focusedNoteId === null || !Number.isInteger(value.dots) || value.dots < 0) return undefined;
   const length = getNoteValueSixteenths(value);
-  // The current editing grid cannot represent a dotted sixteenth's endpoint.
-  if (!Number.isInteger(length) || length < 1) return undefined;
+  // Dotted thirty-seconds do not fit the current editing grid.
+  if (!isOnEditingGrid(length) || length < 0.5) return undefined;
   const chain = getTimelineTieChain(project.outline, cursor.focusedNoteId, cursor.staff);
   const index = chain.findIndex(({ note }) => note.id === cursor.focusedNoteId);
   if (index < 0) return undefined;
@@ -559,12 +567,34 @@ export function setFocusedTimelineNoteValue(
   };
 }
 
-/** Spelling policy used only by F+arrows, never by ordinary notation edits. */
+const SINGLE_NOTE_VALUES: NoteValue[] = [
+  { type: '32nd', dots: 0 }, { type: '16th', dots: 0 }, { type: '16th', dots: 1 },
+  { type: 'eighth', dots: 0 }, { type: 'eighth', dots: 1 },
+  { type: 'quarter', dots: 0 }, { type: 'quarter', dots: 1 },
+  { type: 'half', dots: 0 }, { type: 'half', dots: 1 }, { type: 'whole', dots: 0 },
+];
+
+/** Search input-unit increments for the next representable single written value. */
+export function resizeFocusedTimelineNote(project: ScoreProject, cursor: TimelineCursor, direction: -1 | 1) {
+  const selected = cursor.focusedNoteId
+    ? getLocatedTimelineNote(project.outline, cursor.focusedNoteId, cursor.staff) : undefined;
+  const step = getNoteValueSixteenths(cursor.placementValue);
+  if (!selected || !isOnEditingGrid(step) || step < 0.5) return undefined;
+  const length = getNoteValueSixteenths(selected.note.value);
+  const candidates = direction === 1 ? SINGLE_NOTE_VALUES : [...SINGLE_NOTE_VALUES].reverse();
+  const value = candidates.find((value) => {
+    const difference = (getNoteValueSixteenths(value) - length) * direction;
+    return difference > 0 && difference % step === 0;
+  });
+  return value ? setFocusedTimelineNoteValue(project, cursor, value) : undefined;
+}
+
+/** Spelling policy for explicit normalization and normalized tie resizing. */
 function normalizeResizedNoteValues(position: number, length: number, meter: TimeSignature): NoteValue[] | undefined {
   const values: NoteValue[] = [
     { type: 'whole', dots: 0 }, { type: 'half', dots: 1 }, { type: 'half', dots: 0 },
     { type: 'quarter', dots: 1 }, { type: 'quarter', dots: 0 }, { type: 'eighth', dots: 1 },
-    { type: 'eighth', dots: 0 }, { type: '16th', dots: 0 },
+    { type: 'eighth', dots: 0 }, { type: '16th', dots: 1 }, { type: '16th', dots: 0 }, { type: '32nd', dots: 0 },
   ];
   const compound = meter.unit === 8 && meter.cnt >= 6 && meter.cnt % 3 === 0;
   const beat = compound ? 6 : 16 / meter.unit;
@@ -597,11 +627,21 @@ function normalizeResizedNoteValues(position: number, length: number, meter: Tim
     memo.set(remaining, best!);
     return best!;
   };
-  return Number.isInteger(length) && length > 0 ? solve(length) : undefined;
+  return isOnEditingGrid(length) && length > 0 ? solve(length) : undefined;
 }
 
 export function resizeFocusedTimelineTie(
   project: ScoreProject, cursor: TimelineCursor, direction: -1 | 1,
+): { project: ScoreProject; cursor: TimelineCursor } | undefined {
+  return rewriteFocusedTimelineTie(project, cursor, direction);
+}
+
+export function normalizeFocusedTimelineTie(project: ScoreProject, cursor: TimelineCursor) {
+  return rewriteFocusedTimelineTie(project, cursor, 0);
+}
+
+function rewriteFocusedTimelineTie(
+  project: ScoreProject, cursor: TimelineCursor, direction: -1 | 0 | 1,
 ): { project: ScoreProject; cursor: TimelineCursor } | undefined {
   const staff = cursor.staff;
   if (cursor.focusedNoteId === null) return undefined;
@@ -611,10 +651,10 @@ export function resizeFocusedTimelineTie(
   const last = chain[chain.length - 1];
   const start = first.measureStartSixteenths + first.positionSixteenths;
   const oldEnd = last.measureStartSixteenths + last.positionSixteenths + getNoteValueSixteenths(last.note.value);
-  const step = getNoteValueSixteenths(cursor.placementValue);
+  const step = direction === 0 ? 1 : getNoteValueSixteenths(cursor.placementValue);
   const newEnd = oldEnd + direction * step;
   const limit = getTimelineLengthSixteenths(project.outline);
-  if (!Number.isInteger(step) || step < 1 || newEnd <= start || newEnd > limit) return undefined;
+  if (!isOnEditingGrid(step) || step < 0.5 || newEnd <= start || newEnd > limit) return undefined;
   const samePitchNames = (a: PianoNote['pitches'], b: PianoNote['pitches']) =>
     a.length === b.length && a.every((pitch, index) => pitch.midi === b[index].midi);
   const samePitches = (a: PianoNote['pitches'], b: PianoNote['pitches']) =>
@@ -622,7 +662,7 @@ export function resizeFocusedTimelineTie(
   let expected = start;
   for (const entry of chain) {
     const length = getNoteValueSixteenths(entry.note.value);
-    if (!entry.note.pitches.length || !Number.isInteger(length) || length < 1 ||
+    if (!entry.note.pitches.length || !isOnEditingGrid(length) || length < 0.5 ||
       entry.measureStartSixteenths + entry.positionSixteenths !== expected ||
       !samePitchNames(first.note.pitches, entry.note.pitches)) return undefined;
     expected += length;
@@ -672,7 +712,11 @@ export function resizeFocusedTimelineTie(
     if (index > 0) plan.note.tieFrom = plans[index - 1].note.id;
     if (index + 1 < plans.length) plan.note.tieTo = plans[index + 1].note.id;
   });
-  const tail = plans[plans.length - 1];
+  const selected = chain.find(({ note }) => note.id === cursor.focusedNoteId)!;
+  const selectedOnset = selected.measureStartSixteenths + selected.positionSixteenths;
+  const tail = direction === 0
+    ? plans.find((plan) => plan.onset <= selectedOnset && selectedOnset < plan.onset + getNoteValueSixteenths(plan.note.value))!
+    : plans[plans.length - 1];
   const pitchIndex = cursor.focusedPitchIndex !== null && tail.note.pitches[cursor.focusedPitchIndex]
     ? cursor.focusedPitchIndex : 0;
   const nextProject = rewriteTimelineNoteSpan(project, start, Math.max(oldEnd, newEnd), plans, cursor.staff, cursor.voiceIndex);
@@ -688,7 +732,9 @@ export function setFocusedTimelineNoteType(project: ScoreProject, cursor: Timeli
   const unit = TIMELINE_CURSOR_UNITS.find((unit) => unit.key === key);
   const selected = cursor.focusedNoteId ? getLocatedTimelineNote(project.outline, cursor.focusedNoteId, cursor.staff) : undefined;
   return unit && selected
-    ? setFocusedTimelineNoteValue(project, cursor, { ...selected.note.value, type: unit.type })
+    ? setFocusedTimelineNoteValue(project, cursor, {
+      type: unit.type, dots: selected.note.value.type === unit.type ? selected.note.value.dots : 0,
+    })
     : undefined;
 }
 
@@ -709,7 +755,7 @@ export function moveFocusedTimelineNote(
   const chain = selection.length > 1 ? selection : getTimelineTieChain(project.outline, cursor.focusedNoteId, cursor.staff);
   if (!chain.length) return undefined;
   const shift = direction * getNoteValueSixteenths(cursor.placementValue);
-  if (!Number.isInteger(shift) || shift === 0) return undefined;
+  if (!isOnEditingGrid(shift) || shift === 0) return undefined;
   const ids = new Set(chain.map(({ note }) => note.id));
   const plans: { measureId: string; position: number; onset: number; note: PianoNote }[] = [];
   const others = getLocatedTimelineNotes(project.outline, cursor.staff, cursor.voiceIndex).filter(({ note }) => !ids.has(note.id));
@@ -719,7 +765,7 @@ export function moveFocusedTimelineNote(
     const location = getMeasureAtPosition(project.outline, onset);
     if (!location || !location.measure.data[staff].voices[cursor.voiceIndex]) return undefined;
     const position = onset - location.startSixteenths;
-    if (!Number.isInteger(length) || position + length > location.lengthSixteenths) return undefined;
+    if (!isOnEditingGrid(length) || position + length > location.lengthSixteenths) return undefined;
     if (others.some((other) => {
       const otherStart = other.measureStartSixteenths + other.positionSixteenths;
       return onset < otherStart + getNoteValueSixteenths(other.note.value) && onset + length > otherStart;

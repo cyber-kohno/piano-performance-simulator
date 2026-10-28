@@ -51,13 +51,13 @@ test('MusicXML preserves chords, written rests, dots, fingerings and every local
     staff.voices.push({ id: `voice-${index}`, elements: [{ id: `rest-${staff === measure.data.upperStaff ? 'u' : 'l'}-${index}`, kind: 'measure-rest' }] });
   }
   const xml = createScorePreview(project.outline, 0).xml;
-  assert.match(xml, /<divisions>4<\/divisions>/);
-  assert.equal([...xml.matchAll(/<backup><duration>16<\/duration><\/backup>/g)].length, 5);
-  assert.match(xml, /<chord\/><pitch><step>E<\/step><alter>0<\/alter><octave>4<\/octave><\/pitch><duration>6<\/duration>/);
+  assert.match(xml, /<divisions>8<\/divisions>/);
+  assert.equal([...xml.matchAll(/<backup><duration>32<\/duration><\/backup>/g)].length, 5);
+  assert.match(xml, /<chord\/><pitch><step>E<\/step><alter>0<\/alter><octave>4<\/octave><\/pitch><duration>12<\/duration>/);
   assert.match(xml, /<type>quarter<\/type><dot\/>/);
   assert.match(xml, /<fingering>5<\/fingering>/);
-  assert.match(xml, /<rest\/><duration>2<\/duration>/);
-  assert.match(xml, /<rest\/><duration>8<\/duration>/);
+  assert.match(xml, /<rest\/><duration>4<\/duration>/);
+  assert.match(xml, /<rest\/><duration>16<\/duration>/);
   assert.match(xml, /<voice>6<\/voice>/);
 });
 
@@ -66,7 +66,7 @@ test('full-measure rests use actual pickup length, not the nominal time signatur
   project.outline[2].data.length = { cnt: 1, unit: 4 };
   const xml = createScorePreview(project.outline, 0).xml;
   assert.match(xml, /<measure number="1" implicit="yes">/);
-  assert.equal([...xml.matchAll(/<rest measure="yes"\/><duration>4<\/duration>/g)].length, 2);
+  assert.equal([...xml.matchAll(/<rest measure="yes"\/><duration>8<\/duration>/g)].length, 2);
   assert.match(xml, /<beats>4<\/beats><beat-type>4<\/beat-type>/);
 });
 

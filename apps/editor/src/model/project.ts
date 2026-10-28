@@ -8,7 +8,7 @@ export type MeasureLength = { unit: number; cnt: number };
 
 /** Written value is authoritative; elapsed time is always derived. */
 export type NoteValue = {
-  type: 'whole' | 'half' | 'quarter' | 'eighth' | '16th';
+  type: 'whole' | 'half' | 'quarter' | 'eighth' | '16th' | '32nd';
   dots: number;
 };
 
@@ -53,8 +53,13 @@ export type OutlineBlock = InitialValuesBlock | SectionBlock | MeasureBlock;
 export type ScoreProject = { outline: [InitialValuesBlock, SectionBlock, ...OutlineBlock[]] };
 
 const VALUE_SIXTEENTHS: Record<NoteValue['type'], number> = {
-  whole: 16, half: 8, quarter: 4, eighth: 2, '16th': 1,
+  whole: 16, half: 8, quarter: 4, eighth: 2, '16th': 1, '32nd': 0.5,
 };
+
+/** Current editor resolution; not a restriction on future tuplet notation. */
+export function isOnEditingGrid(value: number): boolean {
+  return Number.isFinite(value) && Number.isInteger(value * 2);
+}
 
 export function getNoteValueSixteenths(value: NoteValue): number {
   return VALUE_SIXTEENTHS[value.type] * (2 - 2 ** -value.dots);
@@ -86,8 +91,8 @@ export function createRestId(): string {
 
 /** Default spelling for a newly exposed rest span; existing rests outside it stay intact. */
 export function createRestElements(start: number, length: number): PianoRest[] {
-  if (!Number.isInteger(start) || !Number.isInteger(length) || start < 0 || length < 0) {
-    throw new RangeError('Rest spans must use the sixteenth-note grid.');
+  if (!isOnEditingGrid(start) || !isOnEditingGrid(length) || start < 0 || length < 0) {
+    throw new RangeError('Rest spans must use the thirty-second-note editing grid.');
   }
   const values = Object.entries(VALUE_SIXTEENTHS) as [NoteValue['type'], number][];
   const result: PianoRest[] = [];

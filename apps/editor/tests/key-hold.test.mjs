@@ -37,19 +37,27 @@ test('hold lifecycle handles both Shift keys, focus loss, missed releases and di
     assert.equal(hold.pitchSelection, false);
     key('keydown', 'KeyF', false);
     assert.equal(hold.noteValueEditing, true);
+    assert.equal(hold.tempoEditing, true);
+    assert.equal(hold.measureLengthEditing, true);
     key('keyup', 'KeyF', false);
     assert.equal(hold.noteValueEditing, false);
+    assert.equal(hold.tempoEditing, false);
+    assert.equal(hold.measureLengthEditing, false);
     key('keydown', 'KeyD', false);
     assert.equal(hold.notePositionEditing, true);
+    assert.equal(hold.meterEditing, true);
     key('keyup', 'KeyD', false);
     assert.equal(hold.notePositionEditing, false);
+    assert.equal(hold.meterEditing, false);
     key('keydown', 'ShiftLeft', true);
     assert.equal(hold.rangeSelection, true);
     assert.equal(hold.pitchSelection, false);
     key('keydown', 'KeyC', true);
     assert.equal(hold.diatonicMovement, true);
+    assert.equal(hold.keySignatureEditing, true);
     key('keyup', 'KeyC', true);
     assert.equal(hold.diatonicMovement, false);
+    assert.equal(hold.keySignatureEditing, false);
     key('keydown', 'ShiftLeft', true); // repeats must not require extra releases
     key('keydown', 'ShiftRight', true);
     key('keyup', 'ShiftLeft', true);

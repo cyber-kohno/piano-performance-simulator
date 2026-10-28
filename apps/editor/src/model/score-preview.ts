@@ -41,15 +41,15 @@ export function createScorePreview(outline: ScoreProject['outline'], activeIndex
   const content = visible.map((measure, index) => {
     const length = measure.data.length.cnt / measure.data.length.unit * 16;
     const irregular = length !== initial.timeSignature.cnt / initial.timeSignature.unit * 16;
-    let body = index === 0 ? `<attributes><divisions>4</divisions><key><fifths>${initial.keySignature.fifths}</fifths></key>` +
+    let body = index === 0 ? `<attributes><divisions>8</divisions><key><fifths>${initial.keySignature.fifths}</fifths></key>` +
       `<time><beats>${initial.timeSignature.cnt}</beats><beat-type>${initial.timeSignature.unit}</beat-type></time>` +
       '<staves>2</staves><clef number="1"><sign>G</sign><line>2</line></clef><clef number="2"><sign>F</sign><line>4</line></clef></attributes>' : '';
     let voiceCount = 0;
     [measure.data.upperStaff, measure.data.lowerStaff].forEach((staff, staffIndex) => staff.voices.forEach((voice, voiceIndex) => {
-      if (voiceCount++ > 0) body += `<backup><duration>${length}</duration></backup>`;
+      if (voiceCount++ > 0) body += `<backup><duration>${length * 2}</duration></backup>`;
       const voiceNumber = staffIndex * 3 + voiceIndex + 1;
       for (const element of voice.elements) {
-        const duration = getElementSixteenths(element, measure.data.length);
+        const duration = getElementSixteenths(element, measure.data.length) * 2;
         const written = element.kind === 'measure-rest' ? '' : `<type>${element.value.type}</type>${'<dot/>'.repeat(element.value.dots)}`;
         if (element.kind !== 'note') {
           body += `<note>${element.kind === 'measure-rest' ? '<rest measure="yes"/>' : '<rest/>'}<duration>${duration}</duration><voice>${voiceNumber}</voice>${written}<staff>${staffIndex + 1}</staff></note>`;

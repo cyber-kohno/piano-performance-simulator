@@ -554,17 +554,25 @@ test('written-value changes consume or restore rests while retaining note identi
   assert.deepEqual(chord.project, before);
 });
 
-test('dot toggling edits the written value and preserves input settings; dotted sixteenths remain rejected', () => {
+test('dot toggling edits the written value and preserves input settings; dotted thirty-seconds remain rejected', () => {
   const initial = singleNote();
-  assert.equal(toggleFocusedTimelineNoteDot(initial.project, initial.cursor), undefined);
+  const dottedSixteenth = toggleFocusedTimelineNoteDot(initial.project, initial.cursor);
+  assert.deepEqual(getLocatedTimelineNote(dottedSixteenth.project.outline, initial.cursor.focusedNoteId).note.value, { type: '16th', dots: 1 });
+  const thirtySecond = setFocusedTimelineNoteType(initial.project, initial.cursor, '4');
+  assert.equal(toggleFocusedTimelineNoteDot(thirtySecond.project, thirtySecond.cursor), undefined);
   const eighth = setFocusedTimelineNoteType(initial.project, initial.cursor, '2');
   const dotted = toggleFocusedTimelineNoteDot(eighth.project, eighth.cursor);
   assert.deepEqual(getLocatedTimelineNote(dotted.project.outline, dotted.cursor.focusedNoteId).note.value, { type: 'eighth', dots: 1 });
   assert.deepEqual(dotted.cursor.placementValue, { type: '16th', dots: 0 });
-  assert.equal(setFocusedTimelineNoteType(dotted.project, dotted.cursor, '1'), undefined);
+  assert.equal(setFocusedTimelineNoteType(dotted.project, dotted.cursor, '2'), undefined);
+  const sixteenth = setFocusedTimelineNoteType(dotted.project, dotted.cursor, '1');
+  assert.deepEqual(getLocatedTimelineNote(sixteenth.project.outline, sixteenth.cursor.focusedNoteId).note.value, { type: '16th', dots: 0 });
   const quarter = setFocusedTimelineNoteType(dotted.project, dotted.cursor, '3');
-  assert.deepEqual(getLocatedTimelineNote(quarter.project.outline, quarter.cursor.focusedNoteId).note.value, { type: 'quarter', dots: 1 });
-  const undotted = toggleFocusedTimelineNoteDot(quarter.project, quarter.cursor);
+  assert.deepEqual(getLocatedTimelineNote(quarter.project.outline, quarter.cursor.focusedNoteId).note.value, { type: 'quarter', dots: 0 });
+  const dottedQuarter = toggleFocusedTimelineNoteDot(quarter.project, quarter.cursor);
+  const backToEighth = setFocusedTimelineNoteType(dottedQuarter.project, dottedQuarter.cursor, '2');
+  assert.deepEqual(getLocatedTimelineNote(backToEighth.project.outline, backToEighth.cursor.focusedNoteId).note.value, { type: 'eighth', dots: 0 });
+  const undotted = toggleFocusedTimelineNoteDot(dottedQuarter.project, dottedQuarter.cursor);
   assert.deepEqual(getLocatedTimelineNote(undotted.project.outline, undotted.cursor.focusedNoteId).note.value, { type: 'quarter', dots: 0 });
   assertComplete(dotted.project);
   assertComplete(quarter.project);

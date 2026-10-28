@@ -374,10 +374,12 @@
           {/each}
           {#each measureNotes[index] as entry (entry.note.id)}
             {@const note = entry.note}
-            {#if mode === 'timeline' && entry.staff === timelineCursor.staff && selectedNoteIds.has(note.id)}
+            {@const activeNoteHeight = entry.length % 4 === 0 ? 24 : entry.length % 2 === 0 ? 18 : 14}
+            {#if mode === 'timeline' && entry.staff === timelineCursor.staff && entry.voiceIndex === timelineCursor.voiceIndex}
               <div
                 class="note-focus-column"
-                class:range-selected={selectedNotes.length > 1}
+                class:focused={selectedNoteIds.has(note.id)}
+                class:range-selected={selectedNoteIds.has(note.id) && selectedNotes.length > 1}
                 class:range-endpoint={selectedNotes.length > 1 && timelineCursor.focusedNoteId === note.id}
                 style={`left: ${entry.position * pixelsPerSixteenth}px; width: ${entry.length * pixelsPerSixteenth}px`}
                 aria-hidden="true"
@@ -394,7 +396,7 @@
                 class:unselected={mode === 'timeline' && entry.staff === timelineCursor.staff && selectedNotes.length <= 1 && timelineCursor.focusedNoteId === note.id && timelineCursor.focusedPitchIndex !== pitchIndex}
                 aria-label={`${entry.staff === 'upperStaff' ? 'Upper' : 'Lower'} staff note ${note.id}`}
                 aria-current={mode === 'timeline' && entry.staff === timelineCursor.staff && timelineCursor.focusedNoteId === note.id && timelineCursor.focusedPitchIndex === pitchIndex ? 'true' : undefined}
-                style={`left: ${entry.position * pixelsPerSixteenth}px; top: ${pitchTopMargin + (108 - pitch.midi) * pitchRowHeight}px; width: ${entry.displayLength * pixelsPerSixteenth}px`}
+                style={`left: ${entry.position * pixelsPerSixteenth}px; top: ${pitchTopMargin + (108 - pitch.midi) * pitchRowHeight}px; width: ${entry.displayLength * pixelsPerSixteenth}px; --active-note-height: ${activeNoteHeight}px`}
               ></div>
             {/each}
           {/each}
@@ -832,6 +834,8 @@
 
   .score-note-pitch:not(.inactive) {
     z-index: 6;
+    height: var(--active-note-height);
+    margin-top: calc((var(--pitch-row-height) - var(--active-note-height)) / 2);
   }
 
   .note-focus-column {
@@ -839,8 +843,12 @@
     z-index: 2;
     top: var(--pitch-top-margin);
     bottom: var(--pitch-bottom-margin);
-    background: rgba(255, 242, 0, 0.121);
+    background: rgba(0, 0, 0, 0.06);
     pointer-events: none;
+  }
+
+  .note-focus-column.focused {
+    background: rgba(255, 242, 0, 0.121);
   }
 
   .note-focus-column.range-selected {

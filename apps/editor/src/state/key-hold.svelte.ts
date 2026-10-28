@@ -5,9 +5,13 @@ const HOLD_BINDINGS = {
   rangeSelection: ['ShiftLeft', 'ShiftRight'],
   pitchSelection: ['KeyE'],
   diatonicMovement: ['KeyC'],
+  keySignatureEditing: ['KeyC'],
   noteNavigation: ['KeyE'],
   noteValueEditing: ['KeyF'],
+  tempoEditing: ['KeyF'],
+  measureLengthEditing: ['KeyF'],
   notePositionEditing: ['KeyD'],
+  meterEditing: ['KeyD'],
 } as const;
 
 export function createKeyHold() {
@@ -52,14 +56,26 @@ export function createKeyHold() {
     get diatonicMovement() {
       return HOLD_BINDINGS.diatonicMovement.some((code) => pressed.has(code));
     },
+    get keySignatureEditing() {
+      return HOLD_BINDINGS.keySignatureEditing.some((code) => pressed.has(code));
+    },
     get noteNavigation() {
       return HOLD_BINDINGS.noteNavigation.some((code) => pressed.has(code));
     },
     get noteValueEditing() {
       return HOLD_BINDINGS.noteValueEditing.some((code) => pressed.has(code));
     },
+    get tempoEditing() {
+      return HOLD_BINDINGS.tempoEditing.some((code) => pressed.has(code));
+    },
+    get measureLengthEditing() {
+      return HOLD_BINDINGS.measureLengthEditing.some((code) => pressed.has(code));
+    },
     get notePositionEditing() {
       return HOLD_BINDINGS.notePositionEditing.some((code) => pressed.has(code));
+    },
+    get meterEditing() {
+      return HOLD_BINDINGS.meterEditing.some((code) => pressed.has(code));
     },
   };
 }

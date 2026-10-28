@@ -3,16 +3,19 @@
   import TimelinePanel from './components/TimelinePanel.svelte';
   import { createProject, getNoteValueSixteenths, type ScoreProject } from './model/project';
   import { createKeyHold } from './state/key-hold.svelte';
+  import { resolveTimelineNumberInput, resolveTimelineDotInput } from './state/number-input';
   import {
     createTimelineCursor,
     setTimelineCursorUnit,
-    TIMELINE_CURSOR_UNITS,
+    toggleTimelineCursorDot,
     setFocusedTimelineNoteType,
     toggleFocusedTimelineNoteDot,
     moveFocusedTimelineNote,
     appendFocusedTimelineTie,
     duplicateFocusedTimelineNoteAfter,
     resizeFocusedTimelineTie,
+    resizeFocusedTimelineNote,
+    normalizeFocusedTimelineTie,
     addTimelineNoteAt,
     findTimelineNoteAtMove,
     getLocatedTimelineNote,
@@ -44,6 +47,10 @@
     deleteOutlineBlock,
     moveOutlineCursor,
     moveOutlineSection,
+    changeInitialKeySignature,
+    changeInitialTempo,
+    changeInitialMeter,
+    changeOutlineMeasureBeats,
   } from './state/outline-cursor';
 
   const initialProject = createProject();
@@ -52,6 +59,12 @@
   let timelineCursor = $state(createTimelineCursor());
   let mode = $state<'outline' | 'timeline'>('outline');
   const keyHold = createKeyHold();
+  const isEditingInitialKey = $derived(mode === 'outline' &&
+    outlineCursor.blockId === project.outline[0].id && keyHold.keySignatureEditing);
+  const isEditingInitialTempo = $derived(mode === 'outline' &&
+    outlineCursor.blockId === project.outline[0].id && keyHold.tempoEditing && !keyHold.keySignatureEditing);
+  const isEditingInitialMeter = $derived(mode === 'outline' &&
+    outlineCursor.blockId === project.outline[0].id && keyHold.meterEditing && !keyHold.tempoEditing && !keyHold.keySignatureEditing);
   const selectedTimelineNotes = $derived(getSelectedTimelineNotes(project.outline, timelineCursor));
 
   const pitchClassNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
@@ -93,9 +106,16 @@
     const isDeleteKey = event.key === 'Delete';
     const isEscapeKey = mode === 'timeline' && event.key === 'Escape';
     const isToggleAdjacentTieKey = mode === 'timeline' && (event.key === '=' || event.code === 'Equal');
-    const isCursorUnitKey = mode === 'timeline' && TIMELINE_CURSOR_UNITS.some((unit) => unit.key === event.key);
-    const isDotKey = mode === 'timeline' && event.key === '.';
-    if (!isVoiceKey && !isToggleModeKey && !isMoveKey && !isMoveSectionKey && !isAddMeasureKey && !isAddSectionKey && !isDeleteKey && !isCursorUnitKey && !isDotKey && !isToggleAdjacentTieKey && !isEscapeKey) return;
+    const numberInput = mode === 'timeline'
+      ? resolveTimelineNumberInput(event, timelineCursor.focusedNoteId !== null, keyHold.rangeSelection)
+      : undefined;
+    const isCursorUnitKey = numberInput !== undefined;
+    const dotInput = mode === 'timeline'
+      ? resolveTimelineDotInput(event, timelineCursor.focusedNoteId !== null, keyHold.rangeSelection)
+      : undefined;
+    const isDotKey = dotInput !== undefined;
+    const isNormalizeKey = mode === 'timeline' && keyHold.noteValueEditing && event.key === 'Enter';
+    if (!isNormalizeKey && !isVoiceKey && !isToggleModeKey && !isMoveKey && !isMoveSectionKey && !isAddMeasureKey && !isAddSectionKey && !isDeleteKey && !isCursorUnitKey && !isDotKey && !isToggleAdjacentTieKey && !isEscapeKey) return;
 
     const target = event.target;
     if (target instanceof HTMLElement && (
@@ -103,6 +123,39 @@
     )) return;
 
     event.preventDefault();
+    if (mode === 'outline' && keyHold.keySignatureEditing) {
+      if (isMoveSectionKey) {
+        const outline = changeInitialKeySignature(project.outline, outlineCursor, event.key === 'ArrowLeft' ? -1 : 1);
+        if (outline !== project.outline) project = { ...project, outline };
+      }
+      return;
+    }
+    if (mode === 'outline' && (keyHold.tempoEditing || keyHold.measureLengthEditing)) {
+      if (isMoveSectionKey) {
+        const direction = event.key === 'ArrowLeft' ? -1 : 1;
+        const block = project.outline.find((entry) => entry.id === outlineCursor.blockId);
+        const outline = block?.type === 'measure' && keyHold.measureLengthEditing
+          ? changeOutlineMeasureBeats(project.outline, outlineCursor, direction)
+          : keyHold.tempoEditing ? changeInitialTempo(project.outline, outlineCursor, direction) : project.outline;
+        if (outline !== project.outline) project = { ...project, outline };
+      }
+      return;
+    }
+    if (mode === 'outline' && keyHold.meterEditing) {
+      if (isMoveKey || isMoveSectionKey) {
+        const outline = changeInitialMeter(project.outline, outlineCursor, event.key);
+        if (outline !== project.outline) project = { ...project, outline };
+      }
+      return;
+    }
+    if (numberInput?.target === 'cursor' && (keyHold.rangeSelection || event.shiftKey)) {
+      timelineCursor = setTimelineCursorUnit(timelineCursor, numberInput.key);
+      return;
+    }
+    if (dotInput === 'cursor' && (keyHold.rangeSelection || event.shiftKey)) {
+      if (!event.repeat) timelineCursor = toggleTimelineCursorDot(timelineCursor);
+      return;
+    }
     if (isVoiceKey) {
       if (keyHold.rangeSelection || event.shiftKey) project = addNextTimelineVoice(project, timelineCursor);
       else {
@@ -126,7 +179,7 @@
       };
       return;
     }
-    if ((keyHold.rangeSelection || event.shiftKey) && isMoveSectionKey && timelineCursor.focusedNoteId !== null) {
+    if ((keyHold.rangeSelection || event.shiftKey) && !keyHold.noteValueEditing && isMoveSectionKey && timelineCursor.focusedNoteId !== null) {
       if (mode === 'timeline') {
         timelineCursor = extendTimelineNoteSelection(project.outline, timelineCursor, event.key === 'ArrowLeft' ? -1 : 1);
         syncOutlineToTimelinePosition(timelineCursor.positionSixteenths);
@@ -147,7 +200,7 @@
       const navigation = isMoveSectionKey && (plain || keyHold.noteNavigation);
       const rangeMove = isMoveSectionKey && keyHold.notePositionEditing && !keyHold.noteValueEditing && !keyHold.pitchSelection;
       // Other editing commands require returning to a single focused note first.
-      if (!navigation && !rangeMove && !(plain && (isDeleteKey || isToggleModeKey || isCursorUnitKey))) return;
+      if (!navigation && !rangeMove && !(plain && (isDeleteKey || isToggleModeKey))) return;
     }
     if (isToggleAdjacentTieKey) {
       const nextProject = toggleTieToAdjacentTimelineNote(project, timelineCursor);
@@ -156,10 +209,11 @@
     }
     if (keyHold.noteValueEditing && !keyHold.pitchSelection) {
       if (mode !== 'timeline') return;
-      const result = isMoveSectionKey ? resizeFocusedTimelineTie(project, timelineCursor, event.key === 'ArrowLeft' ? -1 : 1)
+      const resize = keyHold.rangeSelection || event.shiftKey ? resizeFocusedTimelineTie : resizeFocusedTimelineNote;
+      const result = isMoveSectionKey ? resize(project, timelineCursor, event.key === 'ArrowLeft' ? -1 : 1)
+        : isNormalizeKey && !event.repeat ? normalizeFocusedTimelineTie(project, timelineCursor)
         : isAddMeasureKey ? appendFocusedTimelineTie(project, timelineCursor)
-        : isCursorUnitKey ? setFocusedTimelineNoteType(project, timelineCursor, event.key)
-        : isDotKey && !event.repeat ? toggleFocusedTimelineNoteDot(project, timelineCursor) : undefined;
+        : undefined;
       if (result) {
         project = result.project;
         timelineCursor = result.cursor;
@@ -236,6 +290,7 @@
     }
     if (isToggleModeKey) {
       if (mode === 'outline') {
+        if (!project.outline.some((block) => block.type === 'measure')) return;
         const positionSixteenths = getOutlinePositionSixteenths(project.outline, outlineCursor.blockId);
         timelineCursor = resetTimelineCursorForStaff(
           project.outline, { ...timelineCursor, positionSixteenths }, 'upperStaff',
@@ -251,8 +306,26 @@
     }
 
     if (mode === 'timeline') {
-      if (isCursorUnitKey) {
-        timelineCursor = setTimelineCursorUnit(timelineCursor, event.key);
+      if (numberInput) {
+        if (numberInput.target === 'note') {
+          const result = setFocusedTimelineNoteType(project, timelineCursor, numberInput.key);
+          if (result) {
+            project = result.project;
+            timelineCursor = result.cursor;
+            syncOutlineToTimelinePosition(timelineCursor.positionSixteenths);
+          }
+        } else timelineCursor = setTimelineCursorUnit(timelineCursor, numberInput.key);
+      } else if (isDotKey) {
+        if (!event.repeat) {
+          if (dotInput === 'note') {
+            const result = toggleFocusedTimelineNoteDot(project, timelineCursor);
+            if (result) {
+              project = result.project;
+              timelineCursor = result.cursor;
+              syncOutlineToTimelinePosition(timelineCursor.positionSixteenths);
+            }
+          } else timelineCursor = toggleTimelineCursorDot(timelineCursor);
+        }
       } else if (event.key.toLowerCase() === 'a') {
         const focusedNote = timelineCursor.focusedNoteId
           ? getLocatedTimelineNote(project.outline, timelineCursor.focusedNoteId, timelineCursor.staff)
@@ -378,7 +451,7 @@
   </header>
 
   <main class="workspace" aria-label="Score editing workspace">
-    <OutlinePanel outline={project.outline} cursor={outlineCursor} />
+    <OutlinePanel outline={project.outline} cursor={outlineCursor} keyEditing={isEditingInitialKey} tempoEditing={isEditingInitialTempo} meterEditing={isEditingInitialMeter} />
     <TimelinePanel
       outline={project.outline}
       cursor={outlineCursor}

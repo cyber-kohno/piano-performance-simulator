@@ -2,11 +2,15 @@
   import { onDestroy } from 'svelte';
   import type { ScoreProject } from '../model/project';
   import type { OutlineCursor } from '../state/outline-cursor';
+  import { getMeasureBeatDisplay } from '../state/measure-beats';
   import InitialValues from './InitialValues.svelte';
 
-  let { outline, cursor }: {
+  let { outline, cursor, keyEditing = false, tempoEditing = false, meterEditing = false }: {
     outline: ScoreProject['outline'];
     cursor: OutlineCursor;
+    keyEditing?: boolean;
+    tempoEditing?: boolean;
+    meterEditing?: boolean;
   } = $props();
 
   const initialValues = $derived(outline[0].data);
@@ -72,7 +76,7 @@
             aria-current={cursor.blockId === block.id ? 'true' : undefined}
           >
             <h3>Initial Values</h3>
-            <InitialValues values={block.data} />
+            <InitialValues values={block.data} keyEditing={keyEditing && cursor.blockId === block.id} tempoEditing={tempoEditing && cursor.blockId === block.id} meterEditing={meterEditing && cursor.blockId === block.id} />
           </section>
         {:else if block.type === 'section'}
           <section
@@ -85,6 +89,7 @@
             <h3>{block.data.name}</h3>
           </section>
         {:else if block.type === 'measure'}
+          {@const beats = getMeasureBeatDisplay(initialValues.timeSignature, block.data.length)}
           <section
             class="measure-block"
             data-block-id={block.id}
@@ -92,8 +97,15 @@
             aria-label={`Measure ${getMeasureNumber(block.id)}`}
             aria-current={cursor.blockId === block.id ? 'true' : undefined}
           >
-            <h3>Measure {getMeasureNumber(block.id)}</h3>
-            <span>{block.data.length.cnt}/{block.data.length.unit}</span>
+            <div class="measure-heading">
+              <h3>Measure {getMeasureNumber(block.id)}</h3>
+              <span>Beats {beats.actualLabel}/{beats.standardBeats}</span>
+            </div>
+            <div class="beat-chips" role="img" aria-label={`${beats.actualLabel} of ${beats.standardBeats} beats`}>
+              {#each beats.chips as fill, index (index)}
+                <span class="beat-chip" style={`--beat-fill: ${fill * 100}%`} aria-hidden="true"></span>
+              {/each}
+            </div>
           </section>
         {/if}
       {/each}
@@ -172,14 +184,33 @@
 
   .measure-block {
     position: relative;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
     margin-top: 6px;
     padding: 8px 10px;
     border-left: 3px solid #8299a0;
     background: #e8edf0;
     color: #40565c;
+  }
+
+  .measure-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .beat-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-top: 6px;
+  }
+
+  .beat-chip {
+    flex: 0 0 14px;
+    height: 7px;
+    border: 1px solid #648d85;
+    border-radius: 2px;
+    background: linear-gradient(to right, #648d85 0%, #648d85 var(--beat-fill), transparent var(--beat-fill), transparent 100%);
   }
 
   .measure-block h3 {

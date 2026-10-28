@@ -1,7 +1,9 @@
 <script lang="ts">
   import type { InitialValues } from '../model/project';
 
-  let { values }: { values: InitialValues } = $props();
+  let { values, keyEditing = false, tempoEditing = false, meterEditing = false }: {
+    values: InitialValues; keyEditing?: boolean; tempoEditing?: boolean; meterEditing?: boolean;
+  } = $props();
 
   const keySignatureText = $derived.by(() => {
     const count = Math.abs(values.keySignature.fifths);
@@ -24,15 +26,15 @@
 </script>
 
 <dl class="initial-values">
-  <div>
+  <div class:editing={keyEditing}>
     <dt>Key</dt>
     <dd>{keySignatureText}</dd>
   </div>
-  <div>
+  <div class:editing={meterEditing}>
     <dt>Meter</dt>
     <dd>{values.timeSignature.cnt}/{values.timeSignature.unit}</dd>
   </div>
-  <div>
+  <div class:editing={tempoEditing}>
     <dt>Tempo</dt>
     <dd>{beatUnitText} = {values.tempo}</dd>
   </div>
@@ -51,6 +53,11 @@
     display: grid;
     grid-template-columns: 44px minmax(0, 1fr);
     gap: 8px;
+  }
+
+  .initial-values > div.editing {
+    background: rgba(45, 105, 140, 0.18);
+    border-radius: 2px;
   }
 
   dt {
