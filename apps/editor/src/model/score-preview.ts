@@ -1,4 +1,5 @@
-import { getElementSixteenths, type KeySignature, type PianoPitch, type ScoreProject } from './project.ts';
+import { lcm } from './rational.ts';
+import { getFlattenedVoiceElements, type KeySignature, type PianoPitch, type ScoreProject } from './project.ts';
 
 export function getScorePreviewViewBox(left: number, width: number, top: number, height: number) {
   const viewWidth = Math.max(width * 2, (height + 24) * 478 / 212);
@@ -32,8 +33,10 @@ export function createScorePreview(outline: ScoreProject['outline'], activeIndex
   const firstIndex = Math.max(0, activeIndex - 1);
   const visible = measures.slice(firstIndex, activeIndex + 2);
   const visibleIds = new Set(visible.flatMap((measure) => [measure.data.upperStaff, measure.data.lowerStaff]
-    .flatMap((staff) => staff.voices.flatMap((voice) => voice.elements.map((element) => element.id)))));
+    .flatMap((staff) => staff.voices.flatMap((voice) => getFlattenedVoiceElements(voice, measure.data.length).map(({ element }) => element.id)))));
   const initial = outline[0].data;
+  const ticksPerSixteenth = visible.reduce((resolution, measure) => [measure.data.upperStaff, measure.data.lowerStaff].reduce((staffResolution, staff) =>
+    staff.voices.reduce((voiceResolution, voice) => getFlattenedVoiceElements(voice, measure.data.length).reduce((value, entry) => lcm(value, entry.lengthTime.denominator), voiceResolution), staffResolution), resolution), 2);
   const pitchXml = (pitch: PianoPitch) => {
     const spelling = spellPreviewPitch(pitch.midi, initial.keySignature);
     return `<pitch><step>${spelling.step}</step><alter>${spelling.alter}</alter><octave>${spelling.octave}</octave></pitch>`;
@@ -41,27 +44,30 @@ export function createScorePreview(outline: ScoreProject['outline'], activeIndex
   const content = visible.map((measure, index) => {
     const length = measure.data.length.cnt / measure.data.length.unit * 16;
     const irregular = length !== initial.timeSignature.cnt / initial.timeSignature.unit * 16;
-    let body = index === 0 ? `<attributes><divisions>8</divisions><key><fifths>${initial.keySignature.fifths}</fifths></key>` +
+    let body = index === 0 ? `<attributes><divisions>${ticksPerSixteenth * 4}</divisions><key><fifths>${initial.keySignature.fifths}</fifths></key>` +
       `<time><beats>${initial.timeSignature.cnt}</beats><beat-type>${initial.timeSignature.unit}</beat-type></time>` +
       '<staves>2</staves><clef number="1"><sign>G</sign><line>2</line></clef><clef number="2"><sign>F</sign><line>4</line></clef></attributes>' : '';
     let voiceCount = 0;
     [measure.data.upperStaff, measure.data.lowerStaff].forEach((staff, staffIndex) => staff.voices.forEach((voice, voiceIndex) => {
-      if (voiceCount++ > 0) body += `<backup><duration>${length * 2}</duration></backup>`;
+      if (voiceCount++ > 0) body += `<backup><duration>${length * ticksPerSixteenth}</duration></backup>`;
       const voiceNumber = staffIndex * 3 + voiceIndex + 1;
-      for (const element of voice.elements) {
-        const duration = getElementSixteenths(element, measure.data.length) * 2;
+      for (const entry of getFlattenedVoiceElements(voice, measure.data.length)) {
+        const { element, tuplet, childIndex } = entry;
+        const duration = entry.lengthTime.numerator * (ticksPerSixteenth / entry.lengthTime.denominator);
         const written = element.kind === 'measure-rest' ? '' : `<type>${element.value.type}</type>${'<dot/>'.repeat(element.value.dots)}`;
+        const modification = tuplet ? '<time-modification><actual-notes>' + tuplet.actual + '</actual-notes><normal-notes>' + tuplet.normal + '</normal-notes><normal-type>' + tuplet.baseType + '</normal-type></time-modification>' : '';
+        const bracket = tuplet ? (childIndex === 0 ? '<tuplet type="start" bracket="yes"/>' : '') + (childIndex === tuplet.elements.length - 1 ? '<tuplet type="stop"/>' : '') : '';
         if (element.kind !== 'note') {
-          body += `<note>${element.kind === 'measure-rest' ? '<rest measure="yes"/>' : '<rest/>'}<duration>${duration}</duration><voice>${voiceNumber}</voice>${written}<staff>${staffIndex + 1}</staff></note>`;
+          body += `<note>${element.kind === 'measure-rest' ? '<rest measure="yes"/>' : '<rest/>'}<duration>${duration}</duration><voice>${voiceNumber}</voice>${written}${modification}<staff>${staffIndex + 1}</staff>${bracket ? `<notations>${bracket}</notations>` : ''}</note>`;
           continue;
         }
         const from = element.tieFrom !== undefined && visibleIds.has(element.tieFrom);
         const to = element.tieTo !== undefined && visibleIds.has(element.tieTo);
         element.pitches.forEach((pitch, pitchIndex) => {
           const ties = `${from ? '<tie type="stop"/>' : ''}${to ? '<tie type="start"/>' : ''}`;
-          const notations = `${from ? '<tied type="stop"/>' : ''}${to ? '<tied type="start"/>' : ''}` +
+          const notations = (pitchIndex === 0 ? bracket : '') + `${from ? '<tied type="stop"/>' : ''}${to ? '<tied type="start"/>' : ''}` +
             (pitch.fingering ? `<technical><fingering>${pitch.fingering}</fingering></technical>` : '');
-          body += `<note>${pitchIndex ? '<chord/>' : ''}${pitchXml(pitch)}<duration>${duration}</duration>${ties}<voice>${voiceNumber}</voice>${written}` +
+          body += `<note>${pitchIndex ? '<chord/>' : ''}${pitchXml(pitch)}<duration>${duration}</duration>${ties}<voice>${voiceNumber}</voice>${written}${modification}` +
             (staff.voices.length > 1 ? `<stem>${voiceIndex % 2 === 0 ? 'up' : 'down'}</stem>` : '') +
             `<staff>${staffIndex + 1}</staff>${notations ? `<notations>${notations}</notations>` : ''}</note>`;
         });

@@ -90,7 +90,7 @@ export function changeOutlineMeasureBeats(
   // Check every voice before rebuilding anything; shortening never truncates notes.
   if (direction === -1 && [block.data.upperStaff, block.data.lowerStaff].some((staff) => staff.voices.some((voice) =>
     getLocatedVoiceElements(voice, block.data.length).some((entry) =>
-      entry.element.kind === 'note' && entry.positionSixteenths + entry.lengthSixteenths > nextLength,
+      (entry.element.kind === 'note' || entry.element.kind === 'tuplet') && entry.positionSixteenths + entry.lengthSixteenths > nextLength,
     ),
   ))) return outline;
 

@@ -1,11 +1,13 @@
 <script lang="ts">
   import OutlinePanel from './components/OutlinePanel.svelte';
   import TimelinePanel from './components/TimelinePanel.svelte';
-  import { createProject, getNoteValueSixteenths, type ScoreProject } from './model/project';
+  import { addTime } from './model/rational';
+  import { createProject, type ScoreProject } from './model/project';
   import { createKeyHold } from './state/key-hold.svelte';
   import { resolveTimelineNumberInput, resolveTimelineDotInput } from './state/number-input';
   import {
     createTimelineCursor,
+    toggleTimelineTuplet,
     setTimelineCursorUnit,
     toggleTimelineCursorDot,
     setFocusedTimelineNoteType,
@@ -98,6 +100,7 @@
       event.altKey || event.ctrlKey || event.metaKey
     ) return;
     const isToggleModeKey = event.key.toLowerCase() === 'r';
+    const isTupletKey = mode === 'timeline' && (event.key === '/' || event.code === 'NumpadDivide');
     const isVoiceKey = mode === 'timeline' && event.key.toLowerCase() === 'q';
     const isMoveKey = event.key === 'ArrowUp' || event.key === 'ArrowDown';
     const isMoveSectionKey = event.key === 'ArrowLeft' || event.key === 'ArrowRight';
@@ -115,7 +118,7 @@
       : undefined;
     const isDotKey = dotInput !== undefined;
     const isNormalizeKey = mode === 'timeline' && keyHold.noteValueEditing && event.key === 'Enter';
-    if (!isNormalizeKey && !isVoiceKey && !isToggleModeKey && !isMoveKey && !isMoveSectionKey && !isAddMeasureKey && !isAddSectionKey && !isDeleteKey && !isCursorUnitKey && !isDotKey && !isToggleAdjacentTieKey && !isEscapeKey) return;
+    if (!isTupletKey && !isNormalizeKey && !isVoiceKey && !isToggleModeKey && !isMoveKey && !isMoveSectionKey && !isAddMeasureKey && !isAddSectionKey && !isDeleteKey && !isCursorUnitKey && !isDotKey && !isToggleAdjacentTieKey && !isEscapeKey) return;
 
     const target = event.target;
     if (target instanceof HTMLElement && (
@@ -123,6 +126,10 @@
     )) return;
 
     event.preventDefault();
+    if (isTupletKey) {
+      if (!event.repeat) timelineCursor = toggleTimelineTuplet(timelineCursor);
+      return;
+    }
     if (mode === 'outline' && keyHold.keySignatureEditing) {
       if (isMoveSectionKey) {
         const outline = changeInitialKeySignature(project.outline, outlineCursor, event.key === 'ArrowLeft' ? -1 : 1);
@@ -331,8 +338,7 @@
           ? getLocatedTimelineNote(project.outline, timelineCursor.focusedNoteId, timelineCursor.staff)
           : undefined;
         const noteEndPosition = focusedNote
-          ? focusedNote.measureStartSixteenths + focusedNote.positionSixteenths +
-            getNoteValueSixteenths(focusedNote.note.value)
+          ? addTime(addTime(focusedNote.measureStartSixteenths, focusedNote.positionSixteenths), focusedNote.lengthSixteenths)
           : timelineCursor.positionSixteenths;
         const notePitch = timelineCursor.pitch;
         const result = addTimelineNoteAt(project, timelineCursor, noteEndPosition, notePitch);
@@ -354,7 +360,7 @@
 
         if (focusedNote) {
           const noteStart = focusedNote.measureStartSixteenths + focusedNote.positionSixteenths;
-          const noteEnd = noteStart + getNoteValueSixteenths(focusedNote.note.value);
+          const noteEnd = addTime(noteStart, focusedNote.lengthSixteenths);
           const targetPosition = direction < 0 ? noteStart : noteEnd;
           const totalLength = getTimelineLengthSixteenths(project.outline);
           if (targetPosition < 0 || targetPosition >= totalLength - 1e-8) return;

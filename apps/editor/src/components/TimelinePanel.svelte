@@ -1,9 +1,9 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
   import ScorePreview from './ScorePreview.svelte';
-  import { getLocatedVoiceElements, getNoteValueLabel, getNoteValueSixteenths, type ScoreProject } from '../model/project';
+  import { getFlattenedVoiceElements, getNoteValueLabel, type ScoreProject } from '../model/project';
   import type { OutlineCursor } from '../state/outline-cursor';
-  import { getDiatonicPitchClasses, getLocatedTimelineNotes, getSelectedTimelineNotes, getMeasureAtPosition, getOutlinePositionSixteenths, isTimelinePlacementInvalid, type TimelineCursor } from '../state/timeline-cursor';
+  import { getTimelineInputSixteenths, getDiatonicPitchClasses, getLocatedTimelineNotes, getSelectedTimelineNotes, getMeasureAtPosition, getOutlinePositionSixteenths, isTimelinePlacementInvalid, type TimelineCursor } from '../state/timeline-cursor';
 
   let { outline, cursor, timelineCursor, mode }: {
     outline: ScoreProject['outline'];
@@ -78,7 +78,7 @@
   const pitchRowHeight = 24;
   const cursorLineWidth = 10;
   const cursorPlacementInvalid = $derived(isTimelinePlacementInvalid(outline, timelineCursor));
-  const cursorWidth = $derived(getNoteValueSixteenths(timelineCursor.placementValue) * pixelsPerSixteenth);
+  const cursorWidth = $derived(getTimelineInputSixteenths(timelineCursor) * pixelsPerSixteenth);
   function isDiatonicMidi(midi: number) {
     const pitchClass = ((midi % 12) + 12) % 12;
     return pitches.find((pitch) => pitch.midi % 12 === pitchClass)?.isDiatonic ?? false;
@@ -102,7 +102,7 @@
         const current = notes[index];
         const next = notes[index + 1];
         const currentEnd = current.measureStartSixteenths + current.positionSixteenths +
-          getNoteValueSixteenths(current.note.value);
+          current.lengthSixteenths;
         const nextStart = next.measureStartSixteenths + next.positionSixteenths;
         const isTied = current.note.tieTo === next.note.id && next.note.tieFrom === current.note.id;
         if (Math.abs(currentEnd - nextStart) < 1e-8 && !isTied) gaps.add(current.note.id);
@@ -112,7 +112,7 @@
   });
   const measureNotes = $derived(measures.map((measure) => staffNames
     .flatMap((staff) => {
-      return measure.data[staff].voices.flatMap((voice, voiceIndex) => getLocatedVoiceElements(voice, measure.data.length).flatMap((entry) =>
+      return measure.data[staff].voices.flatMap((voice, voiceIndex) => getFlattenedVoiceElements(voice, measure.data.length).flatMap((entry) =>
         entry.element.kind === 'note' ? [{
           note: entry.element,
           staff,
@@ -127,11 +127,11 @@
   const tiePaths = $derived.by(() => {
     const notes = locatedNotes;
     const byId = new Map(notes.map((entry) => [entry.note.id, entry]));
-    return notes.flatMap(({ note, measureStartSixteenths, positionSixteenths }) => {
+    return notes.flatMap(({ note, measureStartSixteenths, positionSixteenths, lengthSixteenths }) => {
       const next = note.tieTo ? byId.get(note.tieTo) : undefined;
       if (!next || next.note.tieFrom !== note.id) return [];
-      const x1 = (measureStartSixteenths + positionSixteenths + getNoteValueSixteenths(note.value) / 2) * pixelsPerSixteenth;
-      const x2 = (next.measureStartSixteenths + next.positionSixteenths + getNoteValueSixteenths(next.note.value) / 2) * pixelsPerSixteenth;
+      const x1 = (measureStartSixteenths + positionSixteenths + lengthSixteenths / 2) * pixelsPerSixteenth;
+      const x2 = (next.measureStartSixteenths + next.positionSixteenths + next.lengthSixteenths / 2) * pixelsPerSixteenth;
       return note.pitches.map((pitch) => {
         const y = pitchTopMargin + (108 - pitch.midi) * pitchRowHeight + pitchRowHeight / 2;
         return { id: `${note.id}-${next.note.id}-${pitch.midi}`, path: `M ${x1} ${y} Q ${(x1 + x2) / 2} ${y + pitchRowHeight} ${x2} ${y}` };
@@ -323,7 +323,7 @@
           style={`left: ${timelineCursor.positionSixteenths * pixelsPerSixteenth + cursorLineWidth + 4}px; top: ${pitchTopMargin + (108 - timelineCursor.pitch) * pitchRowHeight - 52}px`}
           aria-hidden="true"
         >
-          Input {getNoteValueLabel(timelineCursor.placementValue)}
+          Input {getNoteValueLabel(timelineCursor.placementValue)}{timelineCursor.tuplet ? ' T' : ''}
         </span>
       {/if}
       {#if mode === 'timeline' && focusedNote}
@@ -332,8 +332,8 @@
           style={`left: ${(focusedNote.measureStartSixteenths + focusedNote.positionSixteenths) * pixelsPerSixteenth + 4}px; top: ${pitchTopMargin + (108 - timelineCursor.pitch) * pitchRowHeight - 52}px`}
           aria-hidden="true"
         >
-          <span class="focused-note-value">Note {getNoteValueLabel(focusedNote.note.value)}</span>
-          <span>Input {getNoteValueLabel(timelineCursor.placementValue)}</span>
+          <span class="focused-note-value">Note {getNoteValueLabel(focusedNote.note.value)}{focusedNote.tuplet ? ' T' : ''}</span>
+          <span>Input {getNoteValueLabel(timelineCursor.placementValue)}{timelineCursor.tuplet ? ' T' : ''}</span>
         </span>
       {/if}
       {#if focusedSectionPosition !== null}
