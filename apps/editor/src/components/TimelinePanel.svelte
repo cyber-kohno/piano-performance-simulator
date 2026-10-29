@@ -1,20 +1,30 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
+  import { getPedalEvents, getPedalSpans, type PedalCursor } from '../state/pedal';
   import ScorePreview from './ScorePreview.svelte';
-  import { getFlattenedVoiceElements, getNoteValueLabel, type ScoreProject } from '../model/project';
+  import { getFlattenedVoiceElements, getNoteValueLabel, getNoteValueSixteenths, type ScoreProject } from '../model/project';
   import type { OutlineCursor } from '../state/outline-cursor';
-  import { getTimelineInputSixteenths, getDiatonicPitchClasses, getLocatedTimelineNotes, getSelectedTimelineNotes, getMeasureAtPosition, getOutlinePositionSixteenths, isTimelinePlacementInvalid, type TimelineCursor } from '../state/timeline-cursor';
+  import { getTimelineFixedInputContext, getTimelineInputValue, getTimelineInputSixteenths, getDiatonicPitchClasses, getLocatedTimelineNotes, getSelectedTimelineNotes, getMeasureAtPosition, getOutlinePositionSixteenths, isTimelinePlacementInvalid, type TimelineCursor } from '../state/timeline-cursor';
 
-  let { outline, cursor, timelineCursor, mode }: {
+  let { outline, cursor, timelineCursor, mode, pedalMode = false, pedalCursor }: {
     outline: ScoreProject['outline'];
     cursor: OutlineCursor;
     timelineCursor: TimelineCursor;
     mode: 'outline' | 'timeline';
+    pedalMode?: boolean;
+    pedalCursor: PedalCursor;
   } = $props();
 
   let measureRow = $state<HTMLDivElement>();
   let pianoRollViewport = $state<HTMLElement>();
   let pitchScrollViewport = $state<HTMLDivElement>();
+  let pedalViewport = $state<HTMLElement>();
+  const pedalEvents = $derived(getPedalEvents({ outline }));
+  const pedalSpans = $derived(getPedalSpans({ outline }, { splitAtChanges: true }));
+  function syncPedalScroll() {
+    if (pedalViewport && pianoRollViewport) pedalViewport.scrollLeft = pianoRollViewport.scrollLeft;
+  }
+  $effect(() => { if (pedalViewport) syncPedalScroll(); });
   let scrollTimers: number[] = [];
   let verticalScrollTimers: number[] = [];
 
@@ -78,7 +88,9 @@
   const pitchRowHeight = 24;
   const cursorLineWidth = 10;
   const cursorPlacementInvalid = $derived(isTimelinePlacementInvalid(outline, timelineCursor));
-  const cursorWidth = $derived(getTimelineInputSixteenths(timelineCursor) * pixelsPerSixteenth);
+  const inputValue = $derived(getTimelineInputValue(timelineCursor, outline));
+  const inputTuplet = $derived(getTimelineFixedInputContext(timelineCursor, outline));
+  const cursorWidth = $derived(getTimelineInputSixteenths(timelineCursor, outline) * pixelsPerSixteenth);
   function isDiatonicMidi(midi: number) {
     const pitchClass = ((midi % 12) + 12) % 12;
     return pitches.find((pitch) => pitch.midi % 12 === pitchClass)?.isDiatonic ?? false;
@@ -257,7 +269,7 @@
   });
 </script>
 
-<section class="timeline" aria-label="Timeline panel">
+<section class="timeline" class:pedal-mode={pedalMode} aria-label="Timeline panel">
   <div class="corner" aria-hidden="true"></div>
   <section class="time-header" aria-label="Time header">
     <div class="event-row" aria-label="Event row"></div>
@@ -303,9 +315,9 @@
       <div class="pitch-margin bottom" aria-hidden="true"></div>
     </div>
   </section>
-  <section class="piano-roll" aria-label="Piano roll" bind:this={pianoRollViewport}>
+  <section class="piano-roll" aria-label="Piano roll" bind:this={pianoRollViewport} onscroll={syncPedalScroll}>
     <div class="measure-track" aria-label="Measure timeline">
-      {#if mode === 'timeline' && timelineCursor.focusedNoteId === null}
+      {#if mode === 'timeline' && !pedalMode && timelineCursor.focusedNoteId === null}
         <div
           class="timeline-cursor"
           class:invalid={cursorPlacementInvalid}
@@ -323,17 +335,17 @@
           style={`left: ${timelineCursor.positionSixteenths * pixelsPerSixteenth + cursorLineWidth + 4}px; top: ${pitchTopMargin + (108 - timelineCursor.pitch) * pitchRowHeight - 52}px`}
           aria-hidden="true"
         >
-          Input {getNoteValueLabel(timelineCursor.placementValue)}{timelineCursor.tuplet ? ' T' : ''}
+          <span class:fixed-input={inputTuplet !== undefined}>Input {getNoteValueLabel(inputValue)}{inputTuplet ? ' T' : ''}</span>
         </span>
       {/if}
-      {#if mode === 'timeline' && focusedNote}
+      {#if mode === 'timeline' && !pedalMode && focusedNote}
         <span
           class="note-value-badge note-focused-value-badge"
           style={`left: ${(focusedNote.measureStartSixteenths + focusedNote.positionSixteenths) * pixelsPerSixteenth + 4}px; top: ${pitchTopMargin + (108 - timelineCursor.pitch) * pitchRowHeight - 52}px`}
           aria-hidden="true"
         >
           <span class="focused-note-value">Note {getNoteValueLabel(focusedNote.note.value)}{focusedNote.tuplet ? ' T' : ''}</span>
-          <span>Input {getNoteValueLabel(timelineCursor.placementValue)}{timelineCursor.tuplet ? ' T' : ''}</span>
+          <span class:fixed-input={inputTuplet !== undefined}>Input {getNoteValueLabel(inputValue)}{inputTuplet ? ' T' : ''}</span>
         </span>
       {/if}
       {#if focusedSectionPosition !== null}
@@ -375,7 +387,7 @@
           {#each measureNotes[index] as entry (entry.note.id)}
             {@const note = entry.note}
             {@const activeNoteHeight = entry.length % 4 === 0 ? 24 : entry.length % 2 === 0 ? 18 : 14}
-            {#if mode === 'timeline' && entry.staff === timelineCursor.staff && entry.voiceIndex === timelineCursor.voiceIndex}
+            {#if mode === 'timeline' && !pedalMode && entry.staff === timelineCursor.staff && entry.voiceIndex === timelineCursor.voiceIndex}
               <div
                 class="note-focus-column"
                 class:focused={selectedNoteIds.has(note.id)}
@@ -388,8 +400,8 @@
             {#each note.pitches as pitch, pitchIndex (`${note.id}-${pitch.midi}`)}
               <div
                 class="score-note-pitch"
-                class:inactive={mode === 'outline' || entry.staff !== timelineCursor.staff || entry.voiceIndex !== timelineCursor.voiceIndex}
-                class:timeline-inactive={mode === 'timeline' && (entry.staff !== timelineCursor.staff || entry.voiceIndex !== timelineCursor.voiceIndex)}
+                class:inactive={pedalMode || mode === 'outline' || entry.staff !== timelineCursor.staff || entry.voiceIndex !== timelineCursor.voiceIndex}
+                class:timeline-inactive={mode === 'timeline' && (pedalMode || entry.staff !== timelineCursor.staff || entry.voiceIndex !== timelineCursor.voiceIndex)}
                 class:lower-staff={entry.staff === 'lowerStaff'}
                 class:diatonic={isDiatonicMidi(pitch.midi)}
                 class:chromatic={!isDiatonicMidi(pitch.midi)}
@@ -400,7 +412,7 @@
               ></div>
             {/each}
           {/each}
-          {#if mode === 'timeline' && timelineCursor.voiceIndex > 0 && !measure.data[timelineCursor.staff].voices[timelineCursor.voiceIndex]}
+          {#if mode === 'timeline' && !pedalMode && timelineCursor.voiceIndex > 0 && !measure.data[timelineCursor.staff].voices[timelineCursor.voiceIndex]}
             <div class="missing-voice-blind" aria-hidden="true"></div>
           {/if}
         </div>
@@ -414,6 +426,37 @@
       {/if}
     </div>
   </section>
+  {#if pedalMode}
+    <div class="pedal-label">Pedal</div>
+    <section class="pedal-lane" aria-label="Pedal editing lane" bind:this={pedalViewport}>
+      <div class="pedal-track">
+        <div class="pedal-ruler">
+          {#each headerMeasures as measure (measure.id)}
+            <div class="pedal-measure" style={`width: ${measure.width}px`}>
+              <span>{measure.number}</span>
+              {#each measure.ticks as tick (tick.position)}
+                <i class:major={tick.kind === 'bar' || tick.kind === 'beat'} style={`left: ${tick.position}px`}></i>
+              {/each}
+            </div>
+          {/each}
+        </div>
+        <div class="pedal-unit-range" aria-hidden="true"
+          style={`left: ${pedalCursor.position * pixelsPerSixteenth}px; width: ${getNoteValueSixteenths(pedalCursor.value) * pixelsPerSixteenth}px`}></div>
+        {#each pedalSpans as span (span.start)}
+          <div class="pedal-span" style={`left: ${span.start * pixelsPerSixteenth}px; width: ${(span.end - span.start) * pixelsPerSixteenth}px`}></div>
+        {/each}
+        {#each pedalEvents as event (event.id)}
+          <span class="pedal-event" class:release={event.action === 'stop'} class:retake={event.action === 'change'}
+            role="img"
+            aria-label={`Pedal ${event.action} at ${event.position}`}
+            style={`left: ${event.position * pixelsPerSixteenth}px`}></span>
+        {/each}
+        <div class="pedal-cursor" style={`left: ${pedalCursor.position * pixelsPerSixteenth}px`}>
+          <span class="note-value-badge pedal-input-badge">Input {getNoteValueLabel(pedalCursor.value)}</span>
+        </div>
+      </div>
+    </section>
+  {/if}
   {#if mode === 'timeline'}
   <aside class="selection-status" aria-label="Current measure, staff and voice">
     <div class="selection-status-measure">Measure {statusMeasureNumber ?? '—'}</div>
@@ -442,6 +485,23 @@
     min-width: 0;
     min-height: 0;
   }
+
+  .timeline.pedal-mode { grid-template-rows: var(--timeline-header-height) minmax(0, 1fr) 64px; }
+  .pedal-label { grid-row: 3; grid-column: 1; padding: 8px; background: #c2d9db; border-top: 1px solid #829fa2; }
+  .pedal-lane { grid-row: 3; grid-column: 2; overflow: hidden; background: #e0eded; border-top: 1px solid #829fa2; min-width: 0; container-type: inline-size; }
+  .pedal-track { position: relative; width: max-content; min-width: 100%; height: 64px; padding-right: 50cqw; }
+  .pedal-ruler { display: flex; height: 20px; }
+  .pedal-measure { position: relative; flex-shrink: 0; font-size: 10px; }
+  .pedal-measure span { position: absolute; left: 3px; top: 0; }
+  .pedal-measure i { position: absolute; bottom: 0; height: 5px; width: 1px; background: #91acaf; }
+  .pedal-measure i.major { height: 10px; background: #617e81; }
+  .pedal-unit-range { position: absolute; top: 0; height: 20px; background: rgba(245, 149, 48, 0.22); pointer-events: none; }
+  .pedal-span { position: absolute; top: 50px; height: 10px; background: linear-gradient(to right, rgb(88, 124, 136), rgba(88, 124, 136, 0.3)); }
+  .pedal-event { position: absolute; top: 30px; width: 10px; height: 16px; transform: translateX(-50%); background: #d93636; z-index: 4; }
+  .pedal-event.release { background: #3478d4; }
+  .pedal-event.retake { background: #ebc532; }
+  .pedal-cursor { position: absolute; top: 20px; bottom: 0; width: 2px; background: #d93636; z-index: 3; }
+  .pedal-cursor .pedal-input-badge { top: 0; left: 14px; }
 
   .corner {
     border-right: 1px solid var(--border-color);
@@ -751,6 +811,10 @@
     color: #ffe0ad;
   }
 
+  .fixed-input {
+    color: #9ee8ff;
+  }
+
   .tie-links {
     position: absolute;
     z-index: 7;
@@ -856,7 +920,7 @@
   }
 
   .note-focus-column.range-endpoint {
-    border-left: 2px solid #b42323;
+    background: rgba(239, 68, 68, 0.32);
   }
 
   .roll-gridline {

@@ -2,12 +2,13 @@ import {
   createRestElements, createRestId, getLocatedVoiceElements, getNoteValueSixteenths,
   reconcileOutlineTies, isOnEditingGrid, getFlattenedVoiceElements, mapVoiceNotes,
   type KeySignature, type MeasureBlock, type NoteValue, type OutlineBlock, type PianoNote,
-  type PianoVoiceElement, type PianoTuplet, type TupletRatio, type PianoRest, type ScoreProject, type TimeSignature, type PianoStaffName,
+  type PianoVoiceElement, type PianoTuplet, type PianoRest, type ScoreProject, type TimeSignature, type PianoStaffName,
 } from '../model/project.ts';
 import { addTime, compareTime } from '../model/rational.ts';
-import { getTupletPlacement, addTupletTimelineNote } from './tuplet-input.ts';
+import { getTupletContext, getTupletContexts, getTupletPlacement, addTupletTimelineNote, setTupletNoteValue, resizeTupletNote, moveTupletSelection, isFullTupletSelection } from './tuplet-input.ts';
 import { hasCrossVoicePitchCollision } from '../model/pitch-collision.ts';
 
+export { convertFocusedTimelineTuplet } from './tuplet-input.ts';
 export const MIN_PIANO_PITCH = 21;
 export const MAX_PIANO_PITCH = 108;
 const CHORD_SPAN_LIMIT_SEMITONES = 16; // A major tenth or wider is disallowed.
@@ -49,9 +50,8 @@ export type TimelineCursor = {
   voiceIndex: number;
   /** Editing position only, measured in sixteenths; never persisted on a note. */
   positionSixteenths: number;
-  /** Transient movement and new-note value; never rewrites an existing note. */
+  /** Normal input value, temporarily overridden by the active tuplet's fixed unit. */
   placementValue: NoteValue;
-  tuplet: TupletRatio | null;
   pitch: number;
   focusedNoteId: string | null;
   focusedPitchIndex: number | null;
@@ -70,7 +70,7 @@ export type LocatedTimelineNote = {
   positionSixteenths: number;
 };
 export function createTimelineCursor(staff: PianoStaffName = 'upperStaff'): TimelineCursor {
-  return { staff, tuplet: null, voiceIndex: 0, positionSixteenths: 0, placementValue: { type: '16th', dots: 0 }, pitch: staff === 'upperStaff' ? 60 : 48, focusedNoteId: null, focusedPitchIndex: null, selectionAnchorNoteId: null };
+  return { staff, voiceIndex: 0, positionSixteenths: 0, placementValue: { type: '16th', dots: 0 }, pitch: staff === 'upperStaff' ? 60 : 48, focusedNoteId: null, focusedPitchIndex: null, selectionAnchorNoteId: null };
 }
 
 export function resetTimelineCursorForStaff(
@@ -86,13 +86,19 @@ export function resetTimelineCursorForStaff(
 
 export function switchTimelineStaff(outline: readonly OutlineBlock[], cursor: TimelineCursor): TimelineCursor {
   const focused = cursor.focusedNoteId ? getLocatedTimelineNote(outline, cursor.focusedNoteId, cursor.staff) : undefined;
-  return {
+  const next = {
     ...createTimelineCursor(cursor.staff === 'upperStaff' ? 'lowerStaff' : 'upperStaff'),
     positionSixteenths: focused
       ? focused.measureStartSixteenths + focused.positionSixteenths : cursor.positionSixteenths,
     placementValue: { ...cursor.placementValue },
-    tuplet: cursor.tuplet,
   };
+  return alignAfterTupletExit(outline, cursor, next);
+}
+
+function alignAfterTupletExit(outline: readonly OutlineBlock[], previous: TimelineCursor, next: TimelineCursor): TimelineCursor {
+  const oldGroup = getTupletContext(outline, previous);
+  return oldGroup && !isOnEditingGrid(next.positionSixteenths) && !getTupletContext(outline, next)
+    ? { ...next, positionSixteenths: oldGroup.start } : next;
 }
 
 /** Navigation may fall back to voice 1; edits must instead reject a missing voice. */
@@ -108,11 +114,11 @@ export function cycleTimelineVoice(outline: readonly OutlineBlock[], cursor: Tim
     ? focused.measureStartSixteenths + focused.positionSixteenths : cursor.positionSixteenths;
   const count = getMeasureAtPosition(outline, positionSixteenths)?.measure.data[cursor.staff].voices.length;
   if (!count) return cursor;
-  return {
+  return alignAfterTupletExit(outline, cursor, {
     ...cursor, positionSixteenths, voiceIndex: (cursor.voiceIndex + 1) % count,
     pitch: focused?.note.pitches[cursor.focusedPitchIndex ?? 0]?.midi ?? cursor.pitch,
     focusedNoteId: null, focusedPitchIndex: null, selectionAnchorNoteId: null,
-  };
+  });
 }
 
 /** Add only the next local voice, leaving all editing state and other measures intact. */
@@ -170,20 +176,28 @@ export function setTimelineCursorUnit(cursor: TimelineCursor, key: string): Time
   if (!unit) return cursor;
   const dots = unit.type === 'quarter' && cursor.placementValue.type === 'quarter' ? cursor.placementValue.dots : 0;
   if (cursor.placementValue.type === unit.type && cursor.placementValue.dots === dots) return cursor;
-  return { ...cursor, placementValue: { type: unit.type, dots }, tuplet: null };
+  return { ...cursor, placementValue: { type: unit.type, dots } };
 }
 
-export function getTimelineInputSixteenths(cursor: TimelineCursor): number {
-  return getNoteValueSixteenths(cursor.placementValue) * (cursor.tuplet ? cursor.tuplet.normal / cursor.tuplet.actual : 1);
+export function getTimelineFixedInputContext(cursor: TimelineCursor, outline: readonly OutlineBlock[]) {
+  const context = getTupletContext(outline, cursor);
+  if (!context) return undefined;
+  const selected = getSelectedTimelineNotes(outline, cursor);
+  if (selected.length > 1 && (
+    selected.some((entry) => entry.tuplet?.id !== context.group.id) ||
+    isFullTupletSelection(context, new Set(selected.map(({ note }) => note.id)))
+  )) return undefined;
+  return context;
 }
-export function toggleTimelineTuplet(cursor: TimelineCursor): TimelineCursor {
-  if (!['quarter', 'eighth', '16th'].includes(cursor.placementValue.type)) return cursor;
-  return { ...cursor, tuplet: cursor.tuplet ? null : { actual: 3, normal: 2 }, placementValue: { ...cursor.placementValue, dots: 0 } };
+export function getTimelineInputValue(cursor: TimelineCursor, outline: readonly OutlineBlock[]) {
+  const context = getTimelineFixedInputContext(cursor, outline);
+  return context ? { type: context.group.baseType, dots: 0 } as NoteValue : cursor.placementValue;
 }
-
-export function toggleTimelineCursorDot(cursor: TimelineCursor): TimelineCursor {
-  if (cursor.tuplet) return cursor;
-  if (cursor.placementValue.type !== 'quarter') return cursor;
+export function getTimelineInputSixteenths(cursor: TimelineCursor, outline: readonly OutlineBlock[] = []): number {
+  return getTupletContext(outline, cursor)?.step ?? getNoteValueSixteenths(cursor.placementValue);
+}
+export function toggleTimelineCursorDot(cursor: TimelineCursor, outline: readonly OutlineBlock[] = []): TimelineCursor {
+  if (getTupletContext(outline, cursor) || cursor.placementValue.type !== 'quarter') return cursor;
   return { ...cursor, placementValue: { ...cursor.placementValue, dots: cursor.placementValue.dots > 0 ? 0 : 1 } };
 }
 export function getTimelineLengthSixteenths(outline: readonly OutlineBlock[]): number {
@@ -334,9 +348,17 @@ function getNavigationVoiceIndex(outline: readonly OutlineBlock[], cursor: Timel
   return voiceIndex;
 }
 export function moveTimelineCursorHorizontally(cursor: TimelineCursor, outline: readonly OutlineBlock[], direction: -1 | 1): TimelineCursor {
-  const step = getTimelineInputSixteenths(cursor);
-  const position = addTime(cursor.positionSixteenths, direction * step);
-  if (position < 0 || compareTime(addTime(position, step), getTimelineLengthSixteenths(outline)) > 0) return cursor;
+  const groups = getTupletContexts(outline, cursor);
+  const current = groups.find((group) => direction > 0
+    ? compareTime(cursor.positionSixteenths, group.start) >= 0 && compareTime(cursor.positionSixteenths, group.end) < 0
+    : compareTime(cursor.positionSixteenths, group.start) > 0 && compareTime(cursor.positionSixteenths, group.end) <= 0);
+  const step = current?.step ?? getNoteValueSixteenths(cursor.placementValue);
+  let position = addTime(cursor.positionSixteenths, direction * step);
+  const boundaries = [0, ...groups.flatMap((group) => [group.start, group.end])].filter((boundary) => direction > 0
+    ? compareTime(boundary, cursor.positionSixteenths) > 0 && compareTime(boundary, position) <= 0
+    : compareTime(boundary, cursor.positionSixteenths) < 0 && compareTime(boundary, position) >= 0);
+  if (boundaries.length) position = direction > 0 ? Math.min(...boundaries) : Math.max(...boundaries);
+  if (position < 0 || compareTime(position, getTimelineLengthSixteenths(outline)) >= 0) return cursor;
   const voiceIndex = getNavigationVoiceIndex(outline, cursor, position);
   return reconcileTimelineCursorVoice(outline, { ...cursor, voiceIndex, positionSixteenths: position, focusedNoteId: null, focusedPitchIndex: null, selectionAnchorNoteId: null });
 }
@@ -375,9 +397,9 @@ export function focusAdjacentTimelineNote(outline: readonly OutlineBlock[], curs
   } : cursor.selectionAnchorNoteId === null ? cursor : { ...cursor, selectionAnchorNoteId: null, focusedPitchIndex: 0 };
 }
 export function findTimelineNoteAtMove(outline: readonly OutlineBlock[], cursor: TimelineCursor, direction: -1 | 1) {
-  const step = getTimelineInputSixteenths(cursor);
-  const start = direction < 0 ? addTime(cursor.positionSixteenths, -step) : cursor.positionSixteenths;
-  const end = addTime(start, step);
+  const destination = moveTimelineCursorHorizontally(cursor, outline, direction).positionSixteenths;
+  const start = Math.min(destination, cursor.positionSixteenths);
+  const end = Math.max(destination, cursor.positionSixteenths);
   return getAllTimelineNotes(outline, cursor.staff)
     .sort((a, b) => a.measureStartSixteenths + a.positionSixteenths - b.measureStartSixteenths - b.positionSixteenths)
     .find((entry) => {
@@ -408,7 +430,7 @@ function getPlacementRest(outline: readonly OutlineBlock[], position: number, va
 }
 export function isTimelinePlacementInvalid(outline: readonly OutlineBlock[], cursor: TimelineCursor): boolean {
   if (cursor.focusedNoteId !== null) return false;
-  if (cursor.tuplet) {
+  if (getTupletContext(outline, cursor, cursor.positionSixteenths, false)) {
     const target = getTupletPlacement(outline, cursor);
     return !target || hasCrossVoicePitchCollision(outline, [{ staff: cursor.staff, voiceId: target.voice.id,
       startSixteenths: cursor.positionSixteenths, lengthSixteenths: target.length, pitches: [{ midi: cursor.pitch }] }]);
@@ -426,7 +448,7 @@ export function addTimelineNoteAt(
   position = cursor.positionSixteenths, pitch = cursor.pitch,
 ): { project: ScoreProject; cursor: TimelineCursor } | undefined {
   const staff = cursor.staff;
-  if (cursor.tuplet) return addTupletTimelineNote(project, cursor, position, pitch);
+  if (getTupletContext(project.outline, cursor, position, false)) return addTupletTimelineNote(project, cursor, position, pitch);
   const target = getPlacementRest(project.outline, position, cursor.placementValue, cursor.staff, cursor.voiceIndex);
   if (!target || !Number.isInteger(pitch) || pitch < MIN_PIANO_PITCH || pitch > MAX_PIANO_PITCH) return undefined;
   const { location, voice, first, last, local, length } = target;
@@ -558,16 +580,18 @@ export function setFocusedTimelineNoteValue(
 ): { project: ScoreProject; cursor: TimelineCursor } | undefined {
   const staff = cursor.staff;
   if (cursor.focusedNoteId === null || !Number.isInteger(value.dots) || value.dots < 0) return undefined;
+  if (getTupletContext(project.outline, cursor)) return setTupletNoteValue(project, cursor, value);
   const length = getNoteValueSixteenths(value);
   // Dotted thirty-seconds do not fit the current editing grid.
   if (!isOnEditingGrid(length) || length < 0.5) return undefined;
   const chain = getTimelineTieChain(project.outline, cursor.focusedNoteId, cursor.staff);
-  if (chain.some((entry) => entry.tuplet)) return undefined;
   const index = chain.findIndex(({ note }) => note.id === cursor.focusedNoteId);
   if (index < 0) return undefined;
   const selected = chain[index];
   if (selected.note.value.type === value.type && selected.note.value.dots === value.dots) return undefined;
   const suffix = chain.slice(index);
+  // Incoming tuplets keep their spelling and timing; only this note and its successors move.
+  if (suffix.some((entry) => entry.tuplet)) return undefined;
   const start = selected.measureStartSixteenths + selected.positionSixteenths;
   const tail = suffix[suffix.length - 1];
   const oldEnd = tail.measureStartSixteenths + tail.positionSixteenths + tail.lengthSixteenths;
@@ -610,9 +634,10 @@ const SINGLE_NOTE_VALUES: NoteValue[] = [
 
 /** Search input-unit increments for the next representable single written value. */
 export function resizeFocusedTimelineNote(project: ScoreProject, cursor: TimelineCursor, direction: -1 | 1) {
+  if (getTupletContext(project.outline, cursor)) return resizeTupletNote(project, cursor, direction);
   const selected = cursor.focusedNoteId
     ? getLocatedTimelineNote(project.outline, cursor.focusedNoteId, cursor.staff) : undefined;
-  const step = getTimelineInputSixteenths(cursor);
+  const step = getTimelineInputSixteenths(cursor, project.outline);
   if (!selected || !isOnEditingGrid(step) || step < 0.5) return undefined;
   const length = selected.lengthSixteenths;
   const candidates = direction === 1 ? SINGLE_NOTE_VALUES : [...SINGLE_NOTE_VALUES].reverse();
@@ -686,7 +711,7 @@ function rewriteFocusedTimelineTie(
   const last = chain[chain.length - 1];
   const start = first.measureStartSixteenths + first.positionSixteenths;
   const oldEnd = last.measureStartSixteenths + last.positionSixteenths + last.lengthSixteenths;
-  const step = direction === 0 ? 1 : getTimelineInputSixteenths(cursor);
+  const step = direction === 0 ? 1 : getTimelineInputSixteenths(cursor, project.outline);
   const newEnd = oldEnd + direction * step;
   if (hasTupletInSpan(project.outline, cursor, start, Math.max(oldEnd, newEnd))) return undefined;
   const limit = getTimelineLengthSixteenths(project.outline);
@@ -775,6 +800,7 @@ export function setFocusedTimelineNoteType(project: ScoreProject, cursor: Timeli
 }
 
 export function toggleFocusedTimelineNoteDot(project: ScoreProject, cursor: TimelineCursor) {
+  if (getTupletContext(project.outline, cursor)) return undefined;
   const selected = cursor.focusedNoteId ? getLocatedTimelineNote(project.outline, cursor.focusedNoteId, cursor.staff) : undefined;
   return selected ? setFocusedTimelineNoteValue(project, cursor, {
     ...selected.note.value, dots: selected.note.value.dots > 0 ? 0 : 1,
@@ -789,9 +815,10 @@ export function moveFocusedTimelineNote(
   if (cursor.focusedNoteId === null) return undefined;
   const selection = getSelectedTimelineNotes(project.outline, cursor);
   const chain = selection.length > 1 ? selection : getTimelineTieChain(project.outline, cursor.focusedNoteId, cursor.staff);
+  if (selection.some((entry) => entry.tuplet)) return moveTupletSelection(project, cursor, new Set(selection.map(({ note }) => note.id)), direction);
   if (chain.some((entry) => entry.tuplet)) return undefined;
   if (!chain.length) return undefined;
-  const shift = direction * getTimelineInputSixteenths(cursor);
+  const shift = direction * getTimelineInputSixteenths(cursor, project.outline);
   if (!isOnEditingGrid(shift) || shift === 0) return undefined;
   const ids = new Set(chain.map(({ note }) => note.id));
   const plans: { measureId: string; position: number; onset: number; note: PianoNote }[] = [];
@@ -945,6 +972,33 @@ export function addFocusedNotePitch(project: ScoreProject, cursor: TimelineCurso
     cursor: { ...cursor, pitch: midi, focusedPitchIndex: pitches.findIndex((pitch) => pitch.midi === midi) },
   };
 }
+/** Dissolve only groups emptied by this deletion, keeping neighboring rest spelling intact. */
+function restoreEmptyDeletedTuplets(
+  previous: ScoreProject, next: ScoreProject, staff: PianoStaffName, deletedIds: ReadonlySet<string>, cursorPosition: number,
+) {
+  const affectedGroups = new Set(previous.outline.flatMap((block) => block.type !== 'measure' ? [] :
+    block.data[staff].voices.flatMap((voice) => voice.elements.flatMap((element) =>
+      element.kind === 'tuplet' && element.elements.some((child) => child.kind === 'note' && deletedIds.has(child.id)) ? [element.id] : [],
+    )),
+  ));
+  let measureStart = 0;
+  const outline = next.outline.map((block) => {
+    if (block.type !== 'measure') return block;
+    const offset = measureStart;
+    measureStart += block.data.length.cnt / block.data.length.unit * 16;
+    return { ...block, data: { ...block.data, [staff]: { ...block.data[staff], voices: block.data[staff].voices.map((voice) => ({
+      ...voice, elements: getLocatedVoiceElements(voice, block.data.length).flatMap((entry): PianoVoiceElement[] => {
+        if (entry.element.kind !== 'tuplet' || !affectedGroups.has(entry.element.id) || entry.element.elements.some((child) => child.kind === 'note')) return [entry.element];
+        const start = addTime(offset, entry.positionSixteenths);
+        const end = addTime(start, entry.lengthSixteenths);
+        if (compareTime(cursorPosition, start) >= 0 && compareTime(cursorPosition, end) < 0) cursorPosition = start;
+        return createRestElements(entry.positionSixteenths, entry.lengthSixteenths);
+      }),
+    })) } } };
+  }) as ScoreProject['outline'];
+  return { project: { ...next, outline: reconcileOutlineTies(outline) }, positionSixteenths: cursorPosition };
+}
+
 export function deleteFocusedTimelineNote(project: ScoreProject, cursor: TimelineCursor, pitchOnly = false): { project: ScoreProject; cursor: TimelineCursor } | undefined {
   if (cursor.focusedNoteId === null) return undefined;
   const selection = getSelectedTimelineNotes(project.outline, cursor);
@@ -952,11 +1006,12 @@ export function deleteFocusedTimelineNote(project: ScoreProject, cursor: Timelin
     if (pitchOnly) return undefined;
     const ids = new Set(selection.map(({ note }) => note.id));
     const next = mapTimelineNotes(project, ids, (note) => ({ id: createRestId(), kind: 'rest', value: { ...note.value } }), cursor.staff);
+    const restored = restoreEmptyDeletedTuplets(project, next, cursor.staff, ids, selection[0].measureStartSixteenths + selection[0].positionSixteenths);
     return {
-      project: { ...next, outline: reconcileOutlineTies(next.outline) },
+      project: restored.project,
       cursor: {
         ...cursor, focusedNoteId: null, focusedPitchIndex: null, selectionAnchorNoteId: null,
-        positionSixteenths: selection[0].measureStartSixteenths + selection[0].positionSixteenths,
+        positionSixteenths: restored.positionSixteenths,
       },
     };
   }
@@ -972,10 +1027,11 @@ export function deleteFocusedTimelineNote(project: ScoreProject, cursor: Timelin
     ? { id: createRestId(), kind: 'rest', value: { ...note.value } }
     : { ...note, pitches: note.pitches.filter((_, pitchIndex) => pitchIndex !== index) }, cursor.staff);
   const nextIndex = Math.min(index ?? 0, pitches.length - 1);
+  const restored = restoreEmptyDeletedTuplets(project, nextProject, cursor.staff, targets, located.measureStartSixteenths + located.positionSixteenths);
   return {
-    project: { ...nextProject, outline: reconcileOutlineTies(nextProject.outline) },
+    project: restored.project,
     cursor: pitches.length > 0
       ? { ...cursor, focusedPitchIndex: nextIndex, pitch: pitches[nextIndex].midi }
-      : { ...cursor, positionSixteenths: located.measureStartSixteenths + located.positionSixteenths, focusedNoteId: null, focusedPitchIndex: null, selectionAnchorNoteId: null },
+      : { ...cursor, positionSixteenths: restored.positionSixteenths, focusedNoteId: null, focusedPitchIndex: null, selectionAnchorNoteId: null },
   };
 }

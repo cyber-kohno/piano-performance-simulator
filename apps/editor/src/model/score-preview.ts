@@ -1,5 +1,11 @@
-import { lcm } from './rational.ts';
-import { getFlattenedVoiceElements, type KeySignature, type PianoPitch, type ScoreProject } from './project.ts';
+import { compare, lcm, rational, toNumber } from './rational.ts';
+import { getFlattenedVoiceElements, type KeySignature, type PedalEvent, type PianoPitch, type ScoreProject } from './project.ts';
+
+export type PreviewPedalEvent = {
+  measureOffset: number;
+  position: number;
+  type: PedalEvent['action'] | 'resume' | 'discontinue';
+};
 
 export function getScorePreviewViewBox(left: number, width: number, top: number, height: number) {
   const viewWidth = Math.max(width * 2, (height + 24) * 478 / 212);
@@ -35,8 +41,19 @@ export function createScorePreview(outline: ScoreProject['outline'], activeIndex
   const visibleIds = new Set(visible.flatMap((measure) => [measure.data.upperStaff, measure.data.lowerStaff]
     .flatMap((staff) => staff.voices.flatMap((voice) => getFlattenedVoiceElements(voice, measure.data.length).map(({ element }) => element.id)))));
   const initial = outline[0].data;
-  const ticksPerSixteenth = visible.reduce((resolution, measure) => [measure.data.upperStaff, measure.data.lowerStaff].reduce((staffResolution, staff) =>
+  const noteResolution = visible.reduce((resolution, measure) => [measure.data.upperStaff, measure.data.lowerStaff].reduce((staffResolution, staff) =>
     staff.voices.reduce((voiceResolution, voice) => getFlattenedVoiceElements(voice, measure.data.length).reduce((value, entry) => lcm(value, entry.lengthTime.denominator), voiceResolution), staffResolution), resolution), 2);
+  const ticksPerSixteenth = visible.reduce((resolution, measure) =>
+    (measure.data.pedalEvents ?? []).reduce((value, event) => lcm(value, event.offset.denominator), resolution), noteResolution);
+  // A preview is only a window into the score. Reconstruct its incoming pedal state
+  // without inserting events into the saved project.
+  let pedalDown = false;
+  const pedals: PreviewPedalEvent[] = [];
+  for (const measure of measures.slice(0, firstIndex)) {
+    for (const event of [...(measure.data.pedalEvents ?? [])].sort((a, b) => compare(a.offset, b.offset))) {
+      pedalDown = event.action !== 'stop';
+    }
+  }
   const pitchXml = (pitch: PianoPitch) => {
     const spelling = spellPreviewPitch(pitch.midi, initial.keySignature);
     return `<pitch><step>${spelling.step}</step><alter>${spelling.alter}</alter><octave>${spelling.octave}</octave></pitch>`;
@@ -47,6 +64,25 @@ export function createScorePreview(outline: ScoreProject['outline'], activeIndex
     let body = index === 0 ? `<attributes><divisions>${ticksPerSixteenth * 4}</divisions><key><fifths>${initial.keySignature.fifths}</fifths></key>` +
       `<time><beats>${initial.timeSignature.cnt}</beats><beat-type>${initial.timeSignature.unit}</beat-type></time>` +
       '<staves>2</staves><clef number="1"><sign>G</sign><line>2</line></clef><clef number="2"><sign>F</sign><line>4</line></clef></attributes>' : '';
+    const pedalEvents: { offset: PedalEvent['offset']; type: PreviewPedalEvent['type'] }[] = [...(measure.data.pedalEvents ?? [])]
+      .sort((a, b) => compare(a.offset, b.offset)).map(event => ({ offset: event.offset, type: event.action }));
+    if (index === 0 && pedalDown) {
+      if (pedalEvents[0] && compare(pedalEvents[0].offset, rational(0)) === 0) {
+        // At the left boundary a release has no visible span; a retake resumes it.
+        if (pedalEvents[0].type === 'stop') { pedalEvents.shift(); pedalDown = false; }
+        else pedalEvents[0] = { ...pedalEvents[0], type: 'resume' };
+      } else pedalEvents.unshift({ offset: rational(0), type: 'resume' });
+    }
+    for (const event of pedalEvents) {
+      body += `<direction placement="below"><direction-type><pedal type="${event.type}" line="yes" sign="no" number="1"/></direction-type><offset>${event.offset.numerator * (ticksPerSixteenth / event.offset.denominator)}</offset><staff>2</staff></direction>`;
+      pedals.push({ measureOffset: index, position: toNumber(event.offset), type: event.type });
+      pedalDown = event.type !== 'stop';
+    }
+    if (index === visible.length - 1 && pedalDown) {
+      // A clipped/open line has no release hook. This is presentation only.
+      body += `<direction placement="below"><direction-type><pedal type="discontinue" line="yes" sign="no" number="1"/></direction-type><offset>${length * ticksPerSixteenth}</offset><staff>2</staff></direction>`;
+      pedals.push({ measureOffset: index, position: length, type: 'discontinue' });
+    }
     let voiceCount = 0;
     [measure.data.upperStaff, measure.data.lowerStaff].forEach((staff, staffIndex) => staff.voices.forEach((voice, voiceIndex) => {
       if (voiceCount++ > 0) body += `<backup><duration>${length * ticksPerSixteenth}</duration></backup>`;
@@ -77,6 +113,7 @@ export function createScorePreview(outline: ScoreProject['outline'], activeIndex
   }).join('');
   return {
     activeOffset: activeIndex - firstIndex,
+    pedals,
     xml: '<?xml version="1.0" encoding="UTF-8"?>' +
       '<score-partwise version="4.0"><part-list><score-part id="P1"><part-name>Piano</part-name></score-part></part-list>' +
       `<part id="P1">${content}</part></score-partwise>`,

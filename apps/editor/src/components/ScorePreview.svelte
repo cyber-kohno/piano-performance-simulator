@@ -1,5 +1,6 @@
 <script lang="ts">
   import { createScorePreview, getScorePreviewViewBox } from '../model/score-preview';
+  import { drawPreviewPedals } from '../model/score-preview-pedal';
   import type { ScoreProject } from '../model/project';
 
   let { outline, activeIndex }: { outline: ScoreProject['outline']; activeIndex: number } = $props();
@@ -13,6 +14,7 @@
     const target = host;
     const source = xml;
     const offset = activeOffset;
+    const pedalEvents = preview?.pedals ?? [];
     if (!target) return;
     if (!source) {
       target.replaceChildren();
@@ -37,12 +39,14 @@
           newSystemFromXML: false, newPageFromXML: false,
         });
         renderer.setLogLevel('warn');
+        renderer.EngravingRules.RenderPedals = false;
         await renderer.load(source);
         if (cancelled) return;
         renderer.render();
         const svg = stage.querySelector('svg');
         const measure = renderer.GraphicSheet.MeasureList[offset]?.[0];
         if (!svg || !measure) throw new Error('Missing rendered measure');
+        drawPreviewPedals(svg, renderer, pedalEvents);
         // OSMD positions use staff-space units; its default SVG uses ten pixels per unit.
         const box = measure.PositionAndShape;
         const left = (box.AbsolutePosition.x + box.BorderLeft) * 10;

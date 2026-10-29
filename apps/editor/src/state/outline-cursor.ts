@@ -3,6 +3,8 @@ import {
   type KeySignature, type OutlineBlock, type PianoStaff, type ScoreProject,
 } from '../model/project.ts';
 import { getMeterBeatLength } from './measure-beats.ts';
+import { reconcilePedalOutline } from './pedal.ts';
+import { toNumber } from '../model/rational.ts';
 
 /** Transient editing state, separate from the saved project data. */
 export type OutlineCursor = {
@@ -86,6 +88,8 @@ export function changeOutlineMeasureBeats(
   const nextLength = oldLength + direction * step;
   const standardLength = meter.cnt / meter.unit * 16;
   if (!Number.isInteger(nextLength) || nextLength < step || nextLength > standardLength) return outline;
+  if (block.data.pedalEvents?.some(event => toNumber(event.offset) > nextLength ||
+    (toNumber(event.offset) === nextLength && event.action !== 'stop'))) return outline;
 
   // Check every voice before rebuilding anything; shortening never truncates notes.
   if (direction === -1 && [block.data.upperStaff, block.data.lowerStaff].some((staff) => staff.voices.some((voice) =>
@@ -142,7 +146,7 @@ export function deleteOutlineBlock(
   // An adjacent section may replace the first section, regardless of its ID.
   if (nextOutline[1]?.type !== 'section') return { outline, cursor };
   return {
-    outline: reconcileOutlineTies(nextOutline as ScoreProject['outline']),
+    outline: reconcilePedalOutline(reconcileOutlineTies(nextOutline as ScoreProject['outline'])),
     cursor: { blockId: nextOutline[index - 1].id },
   };
 }

@@ -56,10 +56,16 @@ export type InitialValues = {
 };
 export type InitialValuesBlock = { id: string; type: 'init'; data: InitialValues };
 export type SectionBlock = { id: string; type: 'section'; data: { name: string } };
+export type PedalEvent = {
+  id: string;
+  /** Local musical position, measured in sixteenth notes, independent of notes and voices. */
+  offset: Rational;
+  action: 'start' | 'change' | 'stop';
+};
 export type MeasureBlock = {
   id: string;
   type: 'measure';
-  data: { length: MeasureLength; upperStaff: PianoStaff; lowerStaff: PianoStaff };
+  data: { length: MeasureLength; upperStaff: PianoStaff; lowerStaff: PianoStaff; pedalEvents?: PedalEvent[] };
 };
 export type OutlineBlock = InitialValuesBlock | SectionBlock | MeasureBlock;
 export type ScoreProject = { outline: [InitialValuesBlock, SectionBlock, ...OutlineBlock[]] };
@@ -153,7 +159,7 @@ export function createMeasureData(length: MeasureLength): MeasureBlock['data'] {
   const createStaff = (): PianoStaff => ({
     voices: [{ id: 'voice-0', elements: [{ id: createRestId(), kind: 'measure-rest' }] }],
   });
-  return { length: { ...length }, upperStaff: createStaff(), lowerStaff: createStaff() };
+  return { length: { ...length }, upperStaff: createStaff(), lowerStaff: createStaff(), pedalEvents: [] };
 }
 
 /** Derive tie timing from the voice sequence after outline edits. */

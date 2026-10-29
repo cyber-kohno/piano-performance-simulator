@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { createPedalCursor, movePedalCursor, addPedalEvent, deletePedalEvent } from './state/pedal';
   import OutlinePanel from './components/OutlinePanel.svelte';
   import TimelinePanel from './components/TimelinePanel.svelte';
   import { addTime } from './model/rational';
@@ -7,7 +8,7 @@
   import { resolveTimelineNumberInput, resolveTimelineDotInput } from './state/number-input';
   import {
     createTimelineCursor,
-    toggleTimelineTuplet,
+    convertFocusedTimelineTuplet,
     setTimelineCursorUnit,
     toggleTimelineCursorDot,
     setFocusedTimelineNoteType,
@@ -61,6 +62,8 @@
   let timelineCursor = $state(createTimelineCursor());
   let mode = $state<'outline' | 'timeline'>('outline');
   const keyHold = createKeyHold();
+  let pedalMode = $state(false);
+  let pedalCursor = $state(createPedalCursor());
   const isEditingInitialKey = $derived(mode === 'outline' &&
     outlineCursor.blockId === project.outline[0].id && keyHold.keySignatureEditing);
   const isEditingInitialTempo = $derived(mode === 'outline' &&
@@ -95,6 +98,42 @@
   }
 
   function handleKeydown(event: KeyboardEvent) {
+    const targetElement = event.target;
+    if (event.defaultPrevented || event.isComposing || (targetElement instanceof HTMLElement &&
+      (targetElement.isContentEditable || targetElement.closest('input, textarea, select')))) return;
+    if (mode === 'timeline' && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey && event.key.toLowerCase() === 'p') {
+      event.preventDefault();
+      if (!event.repeat) {
+        pedalMode = !pedalMode;
+        if (pedalMode) {
+          pedalCursor = { ...pedalCursor, position: timelineCursor.positionSixteenths };
+          const block = getOutlineBlockAtPosition(project.outline, pedalCursor.position);
+          if (block) outlineCursor = { blockId: block.id };
+        } else syncOutlineToTimelinePosition(timelineCursor.positionSixteenths);
+      }
+      return;
+    }
+    if (pedalMode) {
+      if (event.ctrlKey || event.altKey || event.metaKey) return;
+      const key = event.key.toLowerCase();
+      const number = resolveTimelineNumberInput(event, false);
+      event.preventDefault();
+      if (key === 'escape') {
+        pedalMode = false;
+        syncOutlineToTimelinePosition(timelineCursor.positionSixteenths);
+      } else if (key === 'arrowleft' || key === 'arrowright') {
+        pedalCursor = movePedalCursor(project, pedalCursor, key === 'arrowleft' ? -1 : 1);
+        const block = getOutlineBlockAtPosition(project.outline, pedalCursor.position);
+        const last = project.outline.filter(block => block.type === 'measure').at(-1);
+        if (block || last) outlineCursor = { blockId: (block ?? last)!.id };
+      } else if (number) {
+        const value = setTimelineCursorUnit({ ...createTimelineCursor(), placementValue: pedalCursor.value }, number.key).placementValue;
+        pedalCursor = { ...pedalCursor, value: { ...value, dots: 0 } };
+      } else if (key === 'a' || key === 's') {
+        project = addPedalEvent(project, pedalCursor.position, key === 'a' ? 'start' : event.shiftKey ? 'change' : 'stop');
+      } else if (key === 'delete') project = deletePedalEvent(project, pedalCursor.position);
+      return;
+    }
     if (
       event.defaultPrevented || event.isComposing ||
       event.altKey || event.ctrlKey || event.metaKey
@@ -127,7 +166,10 @@
 
     event.preventDefault();
     if (isTupletKey) {
-      if (!event.repeat) timelineCursor = toggleTimelineTuplet(timelineCursor);
+      if (!event.repeat) {
+        const result = convertFocusedTimelineTuplet(project, timelineCursor);
+        if (result) { project = result.project; timelineCursor = result.cursor; }
+      }
       return;
     }
     if (mode === 'outline' && keyHold.keySignatureEditing) {
@@ -160,7 +202,7 @@
       return;
     }
     if (dotInput === 'cursor' && (keyHold.rangeSelection || event.shiftKey)) {
-      if (!event.repeat) timelineCursor = toggleTimelineCursorDot(timelineCursor);
+      if (!event.repeat) timelineCursor = toggleTimelineCursorDot(timelineCursor, project.outline);
       return;
     }
     if (isVoiceKey) {
@@ -331,7 +373,7 @@
               timelineCursor = result.cursor;
               syncOutlineToTimelinePosition(timelineCursor.positionSixteenths);
             }
-          } else timelineCursor = toggleTimelineCursorDot(timelineCursor);
+          } else timelineCursor = toggleTimelineCursorDot(timelineCursor, project.outline);
         }
       } else if (event.key.toLowerCase() === 'a') {
         const focusedNote = timelineCursor.focusedNoteId
@@ -442,7 +484,7 @@
     <h1>PIANO <span>EDITOR</span></h1>
     <div class="mode-labels" aria-label="Editing modes">
       <span class:active={mode === 'outline'}>Outline</span>
-      <span class:active={mode === 'timeline'}>Timeline</span>
+      <span class:active={mode === 'timeline'}>Timeline{pedalMode ? ' / Pedal' : ''}</span>
     </div>
     <p class="editing-target">
       {mode === 'outline' ? 'Both staves' : timelineCursor.staff === 'upperStaff' ? 'Upper staff' : 'Lower staff'}
@@ -461,7 +503,9 @@
     <TimelinePanel
       outline={project.outline}
       cursor={outlineCursor}
-      timelineCursor={timelineCursor}
+      timelineCursor={pedalMode ? { ...timelineCursor, positionSixteenths: pedalCursor.position, focusedNoteId: null, selectionAnchorNoteId: null } : timelineCursor}
+      {pedalMode}
+      {pedalCursor}
       mode={mode}
     />
   </main>
