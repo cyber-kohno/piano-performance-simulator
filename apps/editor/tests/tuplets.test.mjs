@@ -105,7 +105,7 @@ test('group insertion rejects occupied spans, bar overflow and grid-incompatible
   assert.equal(addTimelineNoteAt(score(), input(), 1 / 3, 62), undefined);
   const state = addTimelineNoteAt(score(), input(), 0, 60);
   const before = structuredClone(state.project);
-  assert.equal(addTimelineNoteAt(state.project, input('2'), 2 / 3, 62), undefined);
+  assert.equal(addTimelineNoteAt(state.project, input('3'), 2 / 3, 62), undefined);
   assert.equal(addTimelineNoteAt(state.project, createTimelineCursor(), 0, 62), undefined);
   assert.deepEqual(state.project, before);
   assert.equal(isTimelinePlacementInvalid(state.project.outline, { ...input(), positionSixteenths: 0 }), true);
@@ -219,4 +219,41 @@ test('tied tuplet input can continue into a new group and an existing next bar',
   assert.equal(getLocatedTimelineNote(outline, firstId).note.tieTo !== undefined, true);
   assert.equal(getLocatedTimelineNote(outline, state.cursor.focusedNoteId).note.tieFrom !== undefined, true);
   assertComplete(state.project);
+});
+
+test('a quarter triplet consumes two eighth-triplet rests without changing group identity or span', () => {
+  const first = addTimelineNoteAt(score(), input('2'), 0, 60);
+  const original = first.project.outline[2].data.upperStaff.voices[0].elements[0];
+  const result = addTimelineNoteAt(first.project, input('3'), 4 / 3, 64);
+  assert.ok(result);
+  const group = result.project.outline[2].data.upperStaff.voices[0].elements[0];
+  assert.equal(group.id, original.id);
+  assert.equal(group.baseType, 'eighth');
+  assert.deepEqual(group.elements.map(e => [e.kind, e.value.type]), [['note', 'eighth'], ['note', 'quarter']]);
+  assert.deepEqual(getElementTime(group, { cnt: 4, unit: 4 }), rational(4));
+  assert.equal(result.cursor.positionSixteenths, 4 / 3);
+  assertComplete(result.project);
+  const deleted = deleteFocusedTimelineNote(result.project, result.cursor);
+  const smaller = addTimelineNoteAt(deleted.project, input(), 2, 67);
+  assert.ok(smaller);
+  const split = smaller.project.outline[2].data.upperStaff.voices[0].elements[0];
+  assert.deepEqual(split.elements.map(e => [e.kind, e.value.type]), [
+    ['note', 'eighth'], ['rest', '16th'], ['note', '16th'], ['rest', 'eighth'],
+  ]);
+  assertComplete(smaller.project);
+});
+
+test('mixed tuplet placement rejects occupied children, group overflow, ratio mismatch and cross-voice collisions atomically', () => {
+  const first = addTimelineNoteAt(score(), input('2'), 0, 60);
+  const last = addTimelineNoteAt(first.project, input('2'), 8 / 3, 65);
+  const before = structuredClone(last.project);
+  assert.equal(addTimelineNoteAt(last.project, input('3'), 4 / 3, 64), undefined);
+  assert.equal(addTimelineNoteAt(first.project, input('3'), 8 / 3, 64), undefined);
+  assert.equal(addTimelineNoteAt(first.project, { ...input('3'), tuplet: { actual: 5, normal: 4 } }, 4 / 3, 64), undefined);
+  assert.deepEqual(last.project, before);
+  const lower = addTimelineNoteAt(first.project, { ...input('2'), staff: 'lowerStaff' }, 0, 69);
+  const other = addTimelineNoteAt(lower.project, { ...input('2'), staff: 'lowerStaff' }, 8 / 3, 64);
+  assert.equal(addTimelineNoteAt(other.project, input('3'), 4 / 3, 64), undefined);
+  assert.ok(addTimelineNoteAt(other.project, input('3'), 4 / 3, 67));
+  assert.equal(isTimelinePlacementInvalid(first.project.outline, { ...input('3'), positionSixteenths: 4 / 3 }), false);
 });

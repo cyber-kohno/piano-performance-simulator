@@ -1,5 +1,5 @@
-import { createRestElements, createRestId, getFlattenedVoiceElements, getLocatedVoiceElements, getNoteValueSixteenths, isOnEditingGrid, type OutlineBlock, type PianoNote, type PianoTuplet, type ScoreProject } from '../model/project.ts';
-import { addTime, compareTime } from '../model/rational.ts';
+import { createRestElements, createRestId, getLocatedVoiceElements, getNoteValueSixteenths, isOnEditingGrid, type OutlineBlock, type PianoNote, type PianoTuplet, type ScoreProject } from '../model/project.ts';
+import { addTime, compareTime, fromNumber, multiply, rational, toNumber } from '../model/rational.ts';
 import { hasCrossVoicePitchCollision } from '../model/pitch-collision.ts';
 import type { TimelineCursor } from './timeline-cursor.ts';
 
@@ -20,10 +20,26 @@ export function getTupletPlacement(outline: readonly OutlineBlock[], cursor: Tim
     const existing = entries.find((entry) => entry.element.kind === 'tuplet' && compareTime(local, entry.positionSixteenths) >= 0 && compareTime(local, addTime(entry.positionSixteenths, entry.lengthSixteenths)) < 0);
     if (existing && existing.element.kind === 'tuplet') {
       const group = existing.element;
-      if (group.actual !== ratio.actual || group.normal !== ratio.normal || group.baseType !== cursor.placementValue.type) return undefined;
-      const slot = getFlattenedVoiceElements(voice, measure.data.length).find((entry) => entry.tuplet?.id === group.id && compareTime(entry.positionSixteenths, local) === 0);
-      if (!slot || slot.element.kind !== 'rest' || compareTime(slot.lengthSixteenths, length) !== 0) return undefined;
-      return { measure, voice, local, length, rootIndex: existing.index, childIndex: slot.childIndex, group, first: undefined, last: undefined };
+      if (group.actual !== ratio.actual || group.normal !== ratio.normal) return undefined;
+      // Convert performed time back to the group's written time before slicing rests.
+      const writtenStart = toNumber(multiply(fromNumber(addTime(local, -existing.positionSixteenths)), rational(group.actual, group.normal)));
+      const writtenEnd = writtenStart + getNoteValueSixteenths(cursor.placementValue);
+      // Sixteenth triplets are the smallest supported subdivision inside a group.
+      if (!Number.isInteger(writtenStart)) return undefined;
+      let writtenPosition = 0;
+      const children = group.elements.map((element, index) => {
+        const start = writtenPosition;
+        writtenPosition += getNoteValueSixteenths(element.value);
+        return { element, index, start, end: writtenPosition };
+      });
+      if (writtenEnd > writtenPosition) return undefined;
+      const hit = children.filter((entry) => entry.start < writtenEnd && entry.end > writtenStart);
+      if (!hit.length || hit.some(({ element }) => element.kind !== 'rest')) return undefined;
+      const first = hit[0], last = hit[hit.length - 1];
+      return { measure, voice, local, length, rootIndex: existing.index, group, first: undefined, last: undefined,
+        replacement: { firstIndex: first.index, lastIndex: last.index,
+          prefix: createRestElements(first.start, writtenStart - first.start),
+          suffix: createRestElements(writtenEnd, last.end - writtenEnd) } };
     }
     const span = getNoteValueSixteenths(cursor.placementValue) * ratio.normal;
     if (!isOnEditingGrid(local) || compareTime(local + span, measureLength) > 0) return undefined;
@@ -40,7 +56,10 @@ export function addTupletTimelineNote(project: ScoreProject, cursor: TimelineCur
     staff: cursor.staff, voiceId: target.voice.id, startSixteenths: position, lengthSixteenths: target.length, pitches: [{ midi: pitch }],
   }])) return undefined;
   const note: PianoNote = { id: `note-${crypto.randomUUID()}`, kind: 'note', value: { ...cursor.placementValue }, pitches: [{ midi: pitch }] };
-  const group: PianoTuplet = target.group ? { ...target.group, elements: target.group.elements.map((child, index) => index === target.childIndex ? note : child) } : {
+  const group: PianoTuplet = target.group ? { ...target.group, elements: [
+    ...target.group.elements.slice(0, target.replacement!.firstIndex), ...target.replacement!.prefix,
+    note, ...target.replacement!.suffix, ...target.group.elements.slice(target.replacement!.lastIndex + 1),
+  ] } : {
     id: `tuplet-${crypto.randomUUID()}`, kind: 'tuplet', ...cursor.tuplet!, baseType: cursor.placementValue.type,
     elements: Array.from({ length: cursor.tuplet!.actual }, (_, index) => index === 0 ? note : {
       id: createRestId(), kind: 'rest', value: { ...cursor.placementValue },
