@@ -29,6 +29,13 @@ test('hold lifecycle handles both Shift keys, focus loss, missed releases and di
       Object.assign(event, { code, shiftKey });
       window.dispatchEvent(event);
     };
+    key('keydown', 'KeyZ', false);
+    assert.equal(hold.octaveMovement, true);
+    key('keyup', 'KeyZ', false);
+    assert.equal(hold.octaveMovement, false);
+    key('keydown', 'KeyZ', false);
+    window.dispatchEvent(new Event('blur'));
+    assert.equal(hold.octaveMovement, false);
     key('keydown', 'KeyE', false);
     assert.equal(hold.noteNavigation, true);
     assert.equal(hold.pitchSelection, true);

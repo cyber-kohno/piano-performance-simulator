@@ -21,6 +21,7 @@
   let pedalViewport = $state<HTMLElement>();
   const pedalEvents = $derived(getPedalEvents({ outline }));
   const pedalSpans = $derived(getPedalSpans({ outline }, { splitAtChanges: true }));
+  const pedalChangePositions = $derived(new Set(pedalEvents.filter(event => event.action === 'change').map(event => event.position)));
   function syncPedalScroll() {
     if (pedalViewport && pianoRollViewport) pedalViewport.scrollLeft = pianoRollViewport.scrollLeft;
   }
@@ -400,6 +401,7 @@
             {#each note.pitches as pitch, pitchIndex (`${note.id}-${pitch.midi}`)}
               <div
                 class="score-note-pitch"
+                id={pitchIndex === note.pitches.length - 1 ? `note-menu-anchor-${note.id}` : undefined}
                 class:inactive={pedalMode || mode === 'outline' || entry.staff !== timelineCursor.staff || entry.voiceIndex !== timelineCursor.voiceIndex}
                 class:timeline-inactive={mode === 'timeline' && (pedalMode || entry.staff !== timelineCursor.staff || entry.voiceIndex !== timelineCursor.voiceIndex)}
                 class:lower-staff={entry.staff === 'lowerStaff'}
@@ -409,7 +411,7 @@
                 aria-label={`${entry.staff === 'upperStaff' ? 'Upper' : 'Lower'} staff note ${note.id}`}
                 aria-current={mode === 'timeline' && entry.staff === timelineCursor.staff && timelineCursor.focusedNoteId === note.id && timelineCursor.focusedPitchIndex === pitchIndex ? 'true' : undefined}
                 style={`left: ${entry.position * pixelsPerSixteenth}px; top: ${pitchTopMargin + (108 - pitch.midi) * pitchRowHeight}px; width: ${entry.displayLength * pixelsPerSixteenth}px; --active-note-height: ${activeNoteHeight}px`}
-              ></div>
+              >{#if note.articulation === 'staccato' && pitchIndex === 0}<span class="staccato-mark" aria-label="Staccato">•</span>{/if}</div>
             {/each}
           {/each}
           {#if mode === 'timeline' && !pedalMode && timelineCursor.voiceIndex > 0 && !measure.data[timelineCursor.staff].voices[timelineCursor.voiceIndex]}
@@ -443,7 +445,9 @@
         <div class="pedal-unit-range" aria-hidden="true"
           style={`left: ${pedalCursor.position * pixelsPerSixteenth}px; width: ${getNoteValueSixteenths(pedalCursor.value) * pixelsPerSixteenth}px`}></div>
         {#each pedalSpans as span (span.start)}
-          <div class="pedal-span" style={`left: ${span.start * pixelsPerSixteenth}px; width: ${(span.end - span.start) * pixelsPerSixteenth}px`}></div>
+          {@const startInset = pedalChangePositions.has(span.start) ? 2 : 0}
+          {@const endInset = pedalChangePositions.has(span.end) ? 2 : 0}
+          <div class="pedal-span" style={`left: ${span.start * pixelsPerSixteenth + startInset}px; width: ${Math.max(0, (span.end - span.start) * pixelsPerSixteenth - startInset - endInset)}px`}></div>
         {/each}
         {#each pedalEvents as event (event.id)}
           <span class="pedal-event" class:release={event.action === 'stop'} class:retake={event.action === 'change'}
@@ -461,7 +465,7 @@
   <aside class="selection-status" aria-label="Current measure, staff and voice">
     <div class="selection-status-measure">Measure {statusMeasureNumber ?? '—'}</div>
     {#each staffNames as staff (staff)}
-      {@const active = mode === 'timeline' && timelineCursor.staff === staff}
+      {@const active = mode === 'timeline' && !pedalMode && timelineCursor.staff === staff}
       <div class="selection-status-row" class:upper={staff === 'upperStaff'} class:lower={staff === 'lowerStaff'} class:active>
         <span class="selection-status-staff" class:active aria-current={active ? 'true' : undefined}>
           {staff === 'upperStaff' ? 'Upper' : 'Lower'}
@@ -478,6 +482,7 @@
 </section>
 
 <style>
+  .staccato-mark { position: absolute; left: 50%; top: -12px; transform: translateX(-50%); font-size: 16px; line-height: 12px; color: #243b45; pointer-events: none; }
   .timeline {
     display: grid;
     grid-template-columns: var(--pitch-width) minmax(0, 1fr);
@@ -497,11 +502,11 @@
   .pedal-measure i.major { height: 10px; background: #617e81; }
   .pedal-unit-range { position: absolute; top: 0; height: 20px; background: rgba(245, 149, 48, 0.22); pointer-events: none; }
   .pedal-span { position: absolute; top: 50px; height: 10px; background: linear-gradient(to right, rgb(88, 124, 136), rgba(88, 124, 136, 0.3)); }
-  .pedal-event { position: absolute; top: 30px; width: 10px; height: 16px; transform: translateX(-50%); background: #d93636; z-index: 4; }
+  .pedal-event { position: absolute; top: 33px; width: 10px; height: 16px; transform: translateX(-50%); background: #d93636; z-index: 4; }
   .pedal-event.release { background: #3478d4; }
   .pedal-event.retake { background: #ebc532; }
-  .pedal-cursor { position: absolute; top: 20px; bottom: 0; width: 2px; background: #d93636; z-index: 3; }
-  .pedal-cursor .pedal-input-badge { top: 0; left: 14px; }
+  .pedal-cursor { position: absolute; top: 20px; bottom: 0; width: 2px; background: #d93636; z-index: 5; }
+  .pedal-cursor .pedal-input-badge { top: -4px; left: 14px; opacity: 0.9; }
 
   .corner {
     border-right: 1px solid var(--border-color);

@@ -102,6 +102,7 @@ export function createScorePreview(outline: ScoreProject['outline'], activeIndex
         element.pitches.forEach((pitch, pitchIndex) => {
           const ties = `${from ? '<tie type="stop"/>' : ''}${to ? '<tie type="start"/>' : ''}`;
           const notations = (pitchIndex === 0 ? bracket : '') + `${from ? '<tied type="stop"/>' : ''}${to ? '<tied type="start"/>' : ''}` +
+            (pitchIndex === 0 && element.articulation === 'staccato' ? '<articulations><staccato/></articulations>' : '') +
             (pitch.fingering ? `<technical><fingering>${pitch.fingering}</fingering></technical>` : '');
           body += `<note>${pitchIndex ? '<chord/>' : ''}${pitchXml(pitch)}<duration>${duration}</duration>${ties}<voice>${voiceNumber}</voice>${written}${modification}` +
             (staff.voices.length > 1 ? `<stem>${voiceIndex % 2 === 0 ? 'up' : 'down'}</stem>` : '') +

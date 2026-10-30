@@ -20,6 +20,8 @@ export type PianoPitch = {
 };
 
 export type PianoNote = {
+  /** One exclusive notation for this written note/chord, not the entire tie chain. */
+  articulation?: 'staccato';
   id: string;
   kind: 'note';
   value: NoteValue;

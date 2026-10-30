@@ -5,6 +5,7 @@ const HOLD_BINDINGS = {
   rangeSelection: ['ShiftLeft', 'ShiftRight'],
   pitchSelection: ['KeyE'],
   diatonicMovement: ['KeyC'],
+  octaveMovement: ['KeyZ'],
   keySignatureEditing: ['KeyC'],
   noteNavigation: ['KeyE'],
   noteValueEditing: ['KeyF'],
@@ -47,6 +48,7 @@ export function createKeyHold() {
   });
 
   return {
+    reset,
     get rangeSelection() {
       return HOLD_BINDINGS.rangeSelection.some((code) => pressed.has(code));
     },
@@ -55,6 +57,9 @@ export function createKeyHold() {
     },
     get diatonicMovement() {
       return HOLD_BINDINGS.diatonicMovement.some((code) => pressed.has(code));
+    },
+    get octaveMovement() {
+      return HOLD_BINDINGS.octaveMovement.some((code) => pressed.has(code));
     },
     get keySignatureEditing() {
       return HOLD_BINDINGS.keySignatureEditing.some((code) => pressed.has(code));

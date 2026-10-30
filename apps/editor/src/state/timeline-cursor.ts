@@ -737,7 +737,7 @@ function rewriteFocusedTimelineTie(
   // Preserve finger changes as boundaries that normalization cannot merge across.
   const groups: { start: number; pitches: PianoNote['pitches'] }[] = [];
   for (const entry of chain) {
-    if (!groups.length || !samePitches(groups[groups.length - 1].pitches, entry.note.pitches)) {
+    if (!groups.length || entry.note.articulation || !samePitches(groups[groups.length - 1].pitches, entry.note.pitches)) {
       groups.push({ start: entry.measureStartSixteenths + entry.positionSixteenths, pitches: entry.note.pitches });
     }
   }
@@ -763,7 +763,8 @@ function rewriteFocusedTimelineTie(
         usedIds.add(id);
         plans.push({
           measureId: location.measure.id, position: onset - location.startSixteenths, onset,
-          note: { id, kind: 'note', value: { ...value }, pitches: group.pitches.map((pitch) => ({ ...pitch })) },
+          note: { id, kind: 'note', value: { ...value }, pitches: group.pitches.map((pitch) => ({ ...pitch })),
+            ...(previous?.note.articulation ? { articulation: previous.note.articulation } : {}) },
         });
         onset += getNoteValueSixteenths(value);
       }
@@ -903,6 +904,14 @@ function mapTimelineNotes(project: ScoreProject, ids: ReadonlySet<string>, updat
   }) as ScoreProject['outline'] };
 }
 
+export function setFocusedNoteArticulation(project: ScoreProject, cursor: TimelineCursor, articulation: 'staccato' | null): ScoreProject {
+  if (getSelectedTimelineNotes(project.outline, cursor).length !== 1 || !cursor.focusedNoteId) return project;
+  return mapTimelineNotes(project, new Set([cursor.focusedNoteId]), (note) => {
+    const { articulation: previous, ...rest } = note;
+    return articulation ? { ...rest, articulation } : rest;
+  }, cursor.staff);
+}
+
 /** Transpose exactly the selected notes, keeping all chord intervals intact. */
 export function transposeSelectedTimelineNotes(
   project: ScoreProject, cursor: TimelineCursor, direction: -1 | 1,
@@ -928,14 +937,17 @@ export function moveTimelineCursorPitch(cursor: TimelineCursor, direction: -1 | 
   return pitch === undefined ? cursor : { ...cursor, pitch };
 }
 export function moveFocusedTimelineNotePitch(
-  project: ScoreProject, cursor: TimelineCursor, direction: -1 | 1, keySignature?: KeySignature,
+  project: ScoreProject, cursor: TimelineCursor, direction: -1 | 1, keySignature?: KeySignature, octave = false,
 ): { project: ScoreProject; cursor: TimelineCursor } | undefined {
   if (cursor.focusedNoteId === null || cursor.focusedPitchIndex === null) return undefined;
   const located = getLocatedTimelineNote(project.outline, cursor.focusedNoteId, cursor.staff);
   const selected = located?.note.pitches[cursor.focusedPitchIndex];
   if (!located || !selected) return undefined;
-  const midi = findNextPitch(selected.midi, direction, keySignature, new Set(located.note.pitches.map((pitch) => pitch.midi)));
+  const midi = octave ? selected.midi + direction * 12
+    : findNextPitch(selected.midi, direction, keySignature, new Set(located.note.pitches.map((pitch) => pitch.midi)));
   if (midi === undefined) return undefined;
+  if (midi < MIN_PIANO_PITCH || midi > MAX_PIANO_PITCH ||
+    located.note.pitches.some((pitch, index) => index !== cursor.focusedPitchIndex && pitch.midi === midi)) return undefined;
   if (!isChordSpanAllowed(located.note.pitches.map((pitch, index) =>
     index === cursor.focusedPitchIndex ? midi : pitch.midi,
   ))) return undefined;

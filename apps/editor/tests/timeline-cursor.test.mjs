@@ -31,6 +31,28 @@ function blankProject(count = 1, length = { cnt: 4, unit: 4 }) {
 }
 const voiceOf = (project, index = 2) => project.outline[index].data.upperStaff.voices[0];
 const singleNote = (midi = 60) => addTimelineNoteAt(blankProject(), createTimelineCursor(), 0, midi);
+test('octave pitch movement preserves tied chords and rejects bounds, occupied pitches, width and cross-staff collisions', () => {
+  const first = singleNote();
+  const tied = appendFocusedTimelineTie(first.project, first.cursor);
+  const up = moveFocusedTimelineNotePitch(tied.project, first.cursor, 1, undefined, true);
+  assert.deepEqual(getTimelineTieChain(up.project.outline, first.cursor.focusedNoteId).map(e => e.note.pitches[0].midi), [72, 72]);
+  assert.equal(up.cursor.focusedNoteId, first.cursor.focusedNoteId);
+  const down = moveFocusedTimelineNotePitch(up.project, up.cursor, -1, undefined, true);
+  assert.equal(down.cursor.pitch, 60);
+  const high = singleNote(108), low = singleNote(21);
+  assert.equal(moveFocusedTimelineNotePitch(high.project, high.cursor, 1, undefined, true), undefined);
+  assert.equal(moveFocusedTimelineNotePitch(low.project, low.cursor, -1, undefined, true), undefined);
+  const chord = addFocusedNotePitch(first.project, first.cursor);
+  const changed = moveFocusedTimelineNotePitch(chord.project, { ...chord.cursor, focusedPitchIndex: 0 }, -1, undefined, true);
+  assert.deepEqual(getLocatedTimelineNote(changed.project.outline, changed.cursor.focusedNoteId).note.pitches.map(p => p.midi), [59, 48]);
+  assert.equal(changed.cursor.focusedPitchIndex, 1);
+  const occupied = structuredClone(first.project);
+  getLocatedTimelineNote(occupied.outline, first.cursor.focusedNoteId).note.pitches.push({ midi: 48 });
+  assert.equal(moveFocusedTimelineNotePitch(occupied, first.cursor, -1, undefined, true), undefined);
+  assert.equal(moveFocusedTimelineNotePitch(occupied, first.cursor, 1, undefined, true), undefined);
+  const lower = addTimelineNoteAt(first.project, createTimelineCursor('lowerStaff'), 0, 72);
+  assert.equal(moveFocusedTimelineNotePitch(lower.project, first.cursor, 1, undefined, true), undefined);
+});
 const pitchesOf = ({ project, cursor }) => getLocatedTimelineNote(project.outline, cursor.focusedNoteId).note.pitches;
 function assertComplete(project) {
   const ids = new Set();

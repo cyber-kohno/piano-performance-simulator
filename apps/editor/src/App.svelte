@@ -2,12 +2,15 @@
   import { createPedalCursor, movePedalCursor, addPedalEvent, deletePedalEvent } from './state/pedal';
   import OutlinePanel from './components/OutlinePanel.svelte';
   import TimelinePanel from './components/TimelinePanel.svelte';
+  import ArticulationMenu from './components/ArticulationMenu.svelte';
+  import { controlArticulationMenu } from './state/articulation-menu';
   import { addTime } from './model/rational';
   import { createProject, type ScoreProject } from './model/project';
   import { createKeyHold } from './state/key-hold.svelte';
   import { resolveTimelineNumberInput, resolveTimelineDotInput } from './state/number-input';
   import {
     createTimelineCursor,
+    setFocusedNoteArticulation,
     convertFocusedTimelineTuplet,
     setTimelineCursorUnit,
     toggleTimelineCursorDot,
@@ -62,6 +65,17 @@
   let timelineCursor = $state(createTimelineCursor());
   let mode = $state<'outline' | 'timeline'>('outline');
   const keyHold = createKeyHold();
+  let menuPath = $state<number[] | null>(null);
+  function closeMenu() { menuPath = null; keyHold.reset(); }
+  function menuKey(key: string, path = menuPath) {
+    if (!path) return;
+    const result = controlArticulationMenu(path, key);
+    if (result.action === 'staccato' || result.action === 'none') {
+      project = setFocusedNoteArticulation(project, timelineCursor, result.action === 'none' ? null : 'staccato');
+    }
+    menuPath = result.path;
+    if (!menuPath) keyHold.reset();
+  }
   let pedalMode = $state(false);
   let pedalCursor = $state(createPedalCursor());
   const isEditingInitialKey = $derived(mode === 'outline' &&
@@ -84,12 +98,12 @@
     if (block && block.id !== outlineCursor.blockId) outlineCursor = { blockId: block.id };
   }
 
-  function movePitch(direction: -1 | 1, diatonic = false) {
+  function movePitch(direction: -1 | 1, diatonic = false, octave = false) {
     const keySignature = diatonic ? project.outline[0].data.keySignature : undefined;
     if (timelineCursor.focusedNoteId === null) {
       timelineCursor = moveTimelineCursorPitch(timelineCursor, direction, keySignature);
     } else {
-      const result = moveFocusedTimelineNotePitch(project, timelineCursor, direction, keySignature);
+      const result = moveFocusedTimelineNotePitch(project, timelineCursor, direction, keySignature, octave);
       if (result) {
         project = result.project;
         timelineCursor = result.cursor;
@@ -98,9 +112,22 @@
   }
 
   function handleKeydown(event: KeyboardEvent) {
+    if (menuPath) {
+      event.preventDefault();
+      if (!event.isComposing && !event.altKey && !event.ctrlKey && !event.metaKey &&
+        (!event.repeat || ['ArrowUp', 'ArrowDown'].includes(event.key))) menuKey(event.key);
+      return;
+    }
     const targetElement = event.target;
     if (event.defaultPrevented || event.isComposing || (targetElement instanceof HTMLElement &&
       (targetElement.isContentEditable || targetElement.closest('input, textarea, select')))) return;
+    if (event.key.toLowerCase() === 'm' && !event.ctrlKey && !event.altKey && !event.metaKey) {
+      if (mode === 'timeline' && !pedalMode && selectedTimelineNotes.length === 1) {
+        event.preventDefault();
+        if (!event.repeat) { keyHold.reset(); menuPath = [0]; }
+      }
+      return;
+    }
     if (mode === 'timeline' && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey && event.key.toLowerCase() === 'p') {
       event.preventDefault();
       if (!event.repeat) {
@@ -245,7 +272,7 @@
         return;
       }
       const plain = !keyHold.noteValueEditing && !keyHold.notePositionEditing &&
-        !keyHold.diatonicMovement && !keyHold.pitchSelection;
+        !keyHold.diatonicMovement && !keyHold.octaveMovement && !keyHold.pitchSelection;
       const navigation = isMoveSectionKey && (plain || keyHold.noteNavigation);
       const rangeMove = isMoveSectionKey && keyHold.notePositionEditing && !keyHold.noteValueEditing && !keyHold.pitchSelection;
       // Other editing commands require returning to a single focused note first.
@@ -284,6 +311,12 @@
       return;
     }
     // E pitch editing takes priority over scale-constrained movement.
+    if (keyHold.octaveMovement && !keyHold.pitchSelection) {
+      if (mode === 'timeline' && isMoveKey && timelineCursor.focusedNoteId !== null) {
+        movePitch(event.key === 'ArrowUp' ? 1 : -1, false, true);
+      }
+      return;
+    }
     if (keyHold.diatonicMovement && !keyHold.pitchSelection) {
       if (mode === 'timeline' && isMoveKey) movePitch(event.key === 'ArrowUp' ? 1 : -1, true);
       return;
@@ -477,7 +510,7 @@
   }
 </script>
 
-<svelte:window onkeydown={handleKeydown} />
+<svelte:window onkeydown={handleKeydown} onblur={closeMenu} />
 
 <div class="editor">
   <header class="app-header">
@@ -510,6 +543,12 @@
     />
   </main>
 </div>
+
+{#if menuPath && timelineCursor.focusedNoteId}
+  <ArticulationMenu path={menuPath} noteId={timelineCursor.focusedNoteId}
+    current={getLocatedTimelineNote(project.outline, timelineCursor.focusedNoteId, timelineCursor.staff)?.note.articulation}
+    choose={(path) => menuKey('Enter', path)} close={closeMenu} />
+{/if}
 
 <style>
   .editor {
