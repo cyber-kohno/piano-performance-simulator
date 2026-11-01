@@ -124,6 +124,7 @@ export function setTupletNoteValue(project: ScoreProject, cursor: TimelineCursor
   const selected = notes.find(({ note }) => note.id === cursor.focusedNoteId);
   const length = getNoteValueSixteenths(value);
   if (!selected || selected.note.tieFrom || selected.note.tieTo || !Number.isInteger(length / context.base) || length < context.base) return undefined;
+  if ((selected.note.beforeGraceNotes?.length || selected.note.arpeggio) && value.type === '32nd') return undefined;
   if (selected.note.value.type === value.type && selected.note.value.dots === value.dots) return undefined;
   const updated = { ...selected, length, note: { ...selected.note, value: { ...value } } };
   const group = writeGroup(context, notes.map((entry) => entry === selected ? updated : entry));
@@ -144,6 +145,7 @@ export function resizeTupletNote(project: ScoreProject, cursor: TimelineCursor, 
   }
   const value = valueForLength(length);
   if (!value) return undefined;
+  if ((selected.note.beforeGraceNotes?.length || selected.note.arpeggio) && value.type === '32nd') return undefined;
   const group = writeGroup(context, notes.map((entry) => entry === selected ? { ...entry, length, note: { ...entry.note, value } } : entry));
   return group ? commit(project, cursor, context, group, cursor.positionSixteenths, new Set([selected.note.id])) : undefined;
 }

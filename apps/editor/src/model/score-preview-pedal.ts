@@ -56,6 +56,8 @@ export function drawPreviewPedals(svg: SVGSVGElement, renderer: OpenSheetMusicDi
     const endX = left + lower.PositionAndShape.Size.width * 10 - lower.endInstructionsWidth * 10 - 2;
     const anchors = new Map<number, number>();
     for (const staff of column) for (const entry of staff.staffEntries) {
+      // Grace spacing is decorative and must not move the pedal's metrical anchor.
+      if (entry.graphicalVoiceEntries.every(voice => voice.notes.every(note => note.sourceNote.IsGraceNote))) continue;
       // A centered full-measure rest does not identify the beginning of musical time.
       if (entry.graphicalVoiceEntries.every(voice => voice.notes.every(note => note.sourceNote.isRest() && note.sourceNote.isWholeMeasureNote()))) continue;
       const position = entry.relInMeasureTimestamp.RealValue * 16;

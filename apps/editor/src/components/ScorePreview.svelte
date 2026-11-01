@@ -3,10 +3,10 @@
   import { drawPreviewPedals } from '../model/score-preview-pedal';
   import type { ScoreProject } from '../model/project';
 
-  let { outline, activeIndex }: { outline: ScoreProject['outline']; activeIndex: number } = $props();
+  let { outline, activeIndex, trills }: { outline: ScoreProject['outline']; activeIndex: number; trills?: ScoreProject['trills'] } = $props();
   let host = $state<HTMLDivElement>();
   let message = $state<string | null>(null);
-  const preview = $derived(createScorePreview(outline, activeIndex));
+  const preview = $derived(createScorePreview(outline, activeIndex, trills));
   const xml = $derived(preview?.xml ?? null);
   const activeOffset = $derived(preview?.activeOffset ?? 0);
 

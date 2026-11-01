@@ -1,8 +1,8 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { menuItemsAt, isMenuItemSelected } from '../state/articulation-menu';
-  let { path, noteId, current, choose, close }: {
-    path: number[]; noteId: string; current?: 'staccato';
+  import { menuItemsAt } from '../state/note-menu';
+  let { path, noteId, choose, close }: {
+    path: number[]; noteId: string;
     choose: (path: number[]) => void; close: () => void;
   } = $props();
   let left = $state(0), top = $state(0), height = $state(200);
@@ -33,19 +33,18 @@
   });
 </script>
 
-<div class="articulation-menu" aria-label="Articulation menu">
+<div class="note-menu" aria-label="Note menu">
   {#each levels as level, depth}
     {@const offset = path.slice(0, depth).reduce((sum, index) => sum + padding + index * row, 0)}
-    <div class="frame" role="menu" aria-label={depth === 0 ? 'Articulation' : 'Staccato'}
+    <div class="frame" role="menu" aria-label="Note actions"
       style:left={`${Math.min(left + depth * width, Math.max(8, window.innerWidth - width - 8))}px`}
       style:top={`${Math.min(top + offset, window.innerHeight - level.items.length * row - padding * 2 - 8)}px`}
       style:max-height={`${height}px`}>
       {#each level.items as item, index}
         <button type="button" role="menuitem" tabindex="-1" class:focus={level.focus === index}
           class:muted={!level.active || (depth < path.length - 1 && index !== level.focus)}
-          aria-current={isMenuItemSelected(item, current) ? 'true' : undefined}
           onclick={() => { if (level.active) choose([...path.slice(0, depth), index]); }}>
-          <span>{item.label}{isMenuItemSelected(item, current) ? ' ✓' : ''}</span>
+          <span>{item.label}</span>
           {#if item.children}<span>›</span>{/if}
         </button>
       {/each}

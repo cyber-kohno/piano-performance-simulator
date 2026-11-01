@@ -1,12 +1,13 @@
 import {
   createRestElements, createRestId, getLocatedVoiceElements, getNoteValueSixteenths,
   reconcileOutlineTies, isOnEditingGrid, getFlattenedVoiceElements, mapVoiceNotes,
-  type KeySignature, type MeasureBlock, type NoteValue, type OutlineBlock, type PianoNote,
+  type ArpeggioSettings, type StaccatoSettings, type KeySignature, type MeasureBlock, type NoteValue, type OutlineBlock, type PianoNote,
   type PianoVoiceElement, type PianoTuplet, type PianoRest, type ScoreProject, type TimeSignature, type PianoStaffName,
 } from '../model/project.ts';
 import { addTime, compareTime } from '../model/rational.ts';
 import { getTupletContext, getTupletContexts, getTupletPlacement, addTupletTimelineNote, setTupletNoteValue, resizeTupletNote, moveTupletSelection, isFullTupletSelection } from './tuplet-input.ts';
 import { hasCrossVoicePitchCollision } from '../model/pitch-collision.ts';
+import { canApplyArpeggio, isValidArpeggio } from '../model/arpeggio.ts';
 
 export { convertFocusedTimelineTuplet } from './tuplet-input.ts';
 export const MIN_PIANO_PITCH = 21;
@@ -54,6 +55,8 @@ export type TimelineCursor = {
   placementValue: NoteValue;
   pitch: number;
   focusedNoteId: string | null;
+  /** Child of focusedNoteId; transient and independent of ordinary time selection. */
+  focusedGraceId?: string | null;
   focusedPitchIndex: number | null;
   /** Fixed endpoint of a transient note range, retained after Shift is released. */
   selectionAnchorNoteId: string | null;
@@ -299,6 +302,7 @@ export function toggleTieToAdjacentTimelineNote(
   }
 
   const isTied = current.note.tieTo === next.note.id && next.note.tieFrom === current.note.id;
+  if (!isTied && next.note.arpeggio) return undefined;
   if (!isTied && (current.note.tieTo !== undefined || next.note.tieFrom !== undefined)) return undefined;
   const updated = mapTimelineNotes(project, new Set([current.note.id, next.note.id]), (note) => {
     const copy = { ...note };
@@ -511,6 +515,7 @@ export function duplicateFocusedTimelineNoteAfter(
   if (cursor.focusedNoteId === null) return undefined;
   const selected = getLocatedTimelineNote(project.outline, cursor.focusedNoteId, cursor.staff);
   if (!selected || selected.note.pitches.length === 0) return undefined;
+  if ((selected.note.beforeGraceNotes?.length || selected.note.arpeggio) && cursor.placementValue.type === '32nd') return undefined;
   const pitchIndex = cursor.focusedPitchIndex !== null && selected.note.pitches[cursor.focusedPitchIndex]
     ? cursor.focusedPitchIndex : 0;
   const end = addTime(addTime(selected.measureStartSixteenths, selected.positionSixteenths), selected.lengthSixteenths);
@@ -520,6 +525,10 @@ export function duplicateFocusedTimelineNoteAfter(
   const nextProject = mapTimelineNotes(result.project, new Set([noteId]), (note) => ({
     ...note,
     pitches: selected.note.pitches.map((pitch) => ({ ...pitch })),
+    ...(selected.note.arpeggio ? {arpeggio:{...selected.note.arpeggio}} : {}),
+    ...(selected.note.beforeGraceNotes?.length ? { beforeGraceNotes: selected.note.beforeGraceNotes.map(grace => ({
+      ...grace, id: `grace-${crypto.randomUUID()}`, value: { ...grace.value }, pitches: grace.pitches.map(pitch => ({ ...pitch })),
+    })) } : {}),
   }), cursor.staff);
   if (hasEditedPitchCollision(project.outline, nextProject.outline, cursor.staff, new Set([noteId]))) return undefined;
   return {
@@ -588,6 +597,7 @@ export function setFocusedTimelineNoteValue(
   const index = chain.findIndex(({ note }) => note.id === cursor.focusedNoteId);
   if (index < 0) return undefined;
   const selected = chain[index];
+  if ((selected.note.beforeGraceNotes?.length || selected.note.arpeggio) && value.type === '32nd') return undefined;
   if (selected.note.value.type === value.type && selected.note.value.dots === value.dots) return undefined;
   const suffix = chain.slice(index);
   // Incoming tuplets keep their spelling and timing; only this note and its successors move.
@@ -713,6 +723,8 @@ function rewriteFocusedTimelineTie(
   const oldEnd = last.measureStartSixteenths + last.positionSixteenths + last.lengthSixteenths;
   const step = direction === 0 ? 1 : getTimelineInputSixteenths(cursor, project.outline);
   const newEnd = oldEnd + direction * step;
+  if (chain.some(entry => (entry.note.beforeGraceNotes?.length || entry.note.arpeggio) &&
+    entry.measureStartSixteenths + entry.positionSixteenths >= newEnd)) return undefined;
   if (hasTupletInSpan(project.outline, cursor, start, Math.max(oldEnd, newEnd))) return undefined;
   const limit = getTimelineLengthSixteenths(project.outline);
   if (!isOnEditingGrid(step) || step < 0.5 || newEnd <= start || newEnd > limit) return undefined;
@@ -737,7 +749,7 @@ function rewriteFocusedTimelineTie(
   // Preserve finger changes as boundaries that normalization cannot merge across.
   const groups: { start: number; pitches: PianoNote['pitches'] }[] = [];
   for (const entry of chain) {
-    if (!groups.length || entry.note.articulation || !samePitches(groups[groups.length - 1].pitches, entry.note.pitches)) {
+    if (!groups.length || entry.note.staccato || entry.note.arpeggio || entry.note.beforeGraceNotes?.length || !samePitches(groups[groups.length - 1].pitches, entry.note.pitches)) {
       groups.push({ start: entry.measureStartSixteenths + entry.positionSixteenths, pitches: entry.note.pitches });
     }
   }
@@ -761,10 +773,13 @@ function rewriteFocusedTimelineTie(
         while (usedIds.has(`note-${number}`)) number += 1;
         const id = previous?.note.id ?? `note-${number++}`;
         usedIds.add(id);
+        if ((previous?.note.beforeGraceNotes?.length || previous?.note.arpeggio) && value.type === '32nd') return undefined;
         plans.push({
           measureId: location.measure.id, position: onset - location.startSixteenths, onset,
           note: { id, kind: 'note', value: { ...value }, pitches: group.pitches.map((pitch) => ({ ...pitch })),
-            ...(previous?.note.articulation ? { articulation: previous.note.articulation } : {}) },
+            ...(previous?.note.beforeGraceNotes?.length ? { beforeGraceNotes: previous.note.beforeGraceNotes } : {}),
+            ...(previous?.note.arpeggio ? {arpeggio:{...previous.note.arpeggio}} : {}),
+            ...(previous?.note.staccato ? { staccato: { ...previous.note.staccato } } : {}) },
         });
         onset += getNoteValueSixteenths(value);
       }
@@ -904,11 +919,27 @@ function mapTimelineNotes(project: ScoreProject, ids: ReadonlySet<string>, updat
   }) as ScoreProject['outline'] };
 }
 
-export function setFocusedNoteArticulation(project: ScoreProject, cursor: TimelineCursor, articulation: 'staccato' | null): ScoreProject {
-  if (getSelectedTimelineNotes(project.outline, cursor).length !== 1 || !cursor.focusedNoteId) return project;
+export function setFocusedNoteStaccato(project: ScoreProject, cursor: TimelineCursor, staccato: StaccatoSettings | undefined): ScoreProject {
+  const selected=cursor.focusedNoteId ? getLocatedTimelineNote(project.outline,cursor.focusedNoteId,cursor.staff) : undefined;
+  return setFocusedNoteExpressions(project,cursor,{staccato,arpeggio:selected?.note.arpeggio});
+}
+export function setFocusedNoteArpeggio(project: ScoreProject, cursor: TimelineCursor, arpeggio: ArpeggioSettings | undefined): ScoreProject {
+  const selected=cursor.focusedNoteId ? getLocatedTimelineNote(project.outline,cursor.focusedNoteId,cursor.staff) : undefined;
+  return setFocusedNoteExpressions(project,cursor,{arpeggio,staccato:selected?.note.staccato});
+}
+/** Commit optional expressions together so replacing an exclusive effect is atomic. */
+export function setFocusedNoteExpressions(project: ScoreProject, cursor: TimelineCursor, settings: Pick<PianoNote,'staccato'|'arpeggio'>): ScoreProject {
+  if (getSelectedTimelineNotes(project.outline, cursor).length !== 1 || !cursor.focusedNoteId || cursor.focusedGraceId) return project;
+  const selected = getLocatedTimelineNote(project.outline, cursor.focusedNoteId, cursor.staff);
+  const {staccato,arpeggio}=settings;
+  if (!selected || (staccato && arpeggio)) return project;
+  if (staccato && selected.note.tieTo && (staccato.type!==selected.note.staccato?.type || staccato.lengthRatio!==selected.note.staccato?.lengthRatio)) return project;
+  if (arpeggio && (!canApplyArpeggio(selected.note) || !isValidArpeggio(arpeggio))) return project;
+  if (staccato && (!['normal', 'staccatissimo'].includes(staccato.type) || !Number.isFinite(staccato.lengthRatio) ||
+    staccato.lengthRatio < 0.1 || staccato.lengthRatio > 0.9 || Math.abs(staccato.lengthRatio * 10 - Math.round(staccato.lengthRatio * 10)) > 1e-8)) return project;
   return mapTimelineNotes(project, new Set([cursor.focusedNoteId]), (note) => {
-    const { articulation: previous, ...rest } = note;
-    return articulation ? { ...rest, articulation } : rest;
+    const { staccato: previous, arpeggio: previousArpeggio, ...rest } = note;
+    return { ...rest,...(staccato ? {staccato:{...staccato}} : {}),...(arpeggio ? {arpeggio:{...arpeggio}} : {}) };
   }, cursor.staff);
 }
 
@@ -972,6 +1003,7 @@ export function addFocusedNotePitch(project: ScoreProject, cursor: TimelineCurso
   const located = getLocatedTimelineNote(project.outline, cursor.focusedNoteId, cursor.staff);
   const selected = located?.note.pitches[cursor.focusedPitchIndex];
   if (!located || !selected) return undefined;
+  if (getTimelineTieChain(project.outline, located.note.id, cursor.staff).some(entry => entry.note.beforeGraceNotes?.length)) return undefined;
   const midi = selected.midi - 1;
   if (midi < MIN_PIANO_PITCH || located.note.pitches.some((pitch) => pitch.midi === midi)) return undefined;
   const pitches = [...located.note.pitches, { midi }].sort((a, b) => b.midi - a.midi);
@@ -1032,6 +1064,7 @@ export function deleteFocusedTimelineNote(project: ScoreProject, cursor: Timelin
   const index = cursor.focusedPitchIndex;
   if (pitchOnly && (index === null || !located.note.pitches[index])) return undefined;
   const pitches = pitchOnly ? located.note.pitches.filter((_, pitchIndex) => pitchIndex !== index) : [];
+  if (pitches.length === 1 && getTimelineTieChain(project.outline,located.note.id,cursor.staff).some(entry=>entry.note.arpeggio)) return undefined;
   const targets = pitchOnly
     ? new Set(getTimelineTieChain(project.outline, located.note.id, cursor.staff).map(({ note }) => note.id))
     : new Set([located.note.id]);

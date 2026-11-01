@@ -1,16 +1,20 @@
 <script lang="ts">
+  import { addBeforeGrace, cycleGraceFocus, deleteFocusedGrace, focusGraceParent, getFocusedGrace, moveGracePitch } from './state/grace-input';
   import { createPedalCursor, movePedalCursor, addPedalEvent, deletePedalEvent } from './state/pedal';
   import OutlinePanel from './components/OutlinePanel.svelte';
   import TimelinePanel from './components/TimelinePanel.svelte';
-  import ArticulationMenu from './components/ArticulationMenu.svelte';
-  import { controlArticulationMenu } from './state/articulation-menu';
+  import NoteMenu from './components/NoteMenu.svelte';
+  import ExpressionModal from './components/ExpressionModal.svelte';
+  import { createExpressionEditor, controlExpressionEditor, validateExpressionDraft, staccatoFromDraft, arpeggioFromDraft, trillFromDraft, type ExpressionEditor } from './state/expression-editor';
+  import { getNoteTrill, getTrillChain, setNoteTrill, reconcileTrills } from './model/trill';
+  import { controlNoteMenu } from './state/note-menu';
   import { addTime } from './model/rational';
   import { createProject, type ScoreProject } from './model/project';
   import { createKeyHold } from './state/key-hold.svelte';
   import { resolveTimelineNumberInput, resolveTimelineDotInput } from './state/number-input';
   import {
     createTimelineCursor,
-    setFocusedNoteArticulation,
+    setFocusedNoteExpressions,
     convertFocusedTimelineTuplet,
     setTimelineCursorUnit,
     toggleTimelineCursorDot,
@@ -66,15 +70,25 @@
   let mode = $state<'outline' | 'timeline'>('outline');
   const keyHold = createKeyHold();
   let menuPath = $state<number[] | null>(null);
+  let expressionTarget = $state<{ noteId: string; measureNumber: number; staff: 'upperStaff' | 'lowerStaff'; voice: number; trillNoteCount: number } | null>(null);
+  let expressionEditor = $state<ExpressionEditor | null>(null);
+  function openExpressionModal() {
+    if (mode !== 'timeline' || pedalMode || getFocusedGrace(project.outline, timelineCursor) || selectedTimelineNotes.length !== 1) return;
+    const target = selectedTimelineNotes[0];
+    expressionEditor = createExpressionEditor(target.note,getNoteTrill(project,target.note.id)?.settings);
+    expressionTarget = { noteId: target.note.id, staff: timelineCursor.staff, voice: target.voiceIndex + 1,
+      trillNoteCount:getTrillChain(project,target.note.id).length,
+      measureNumber: project.outline.filter(block => block.type === 'measure').findIndex(block => block.id === target.measure.id) + 1 };
+    closeMenu();
+  }
+  function closeExpressionModal() { expressionTarget = null; expressionEditor = null; keyHold.reset(); }
   function closeMenu() { menuPath = null; keyHold.reset(); }
   function menuKey(key: string, path = menuPath) {
     if (!path) return;
-    const result = controlArticulationMenu(path, key);
-    if (result.action === 'staccato' || result.action === 'none') {
-      project = setFocusedNoteArticulation(project, timelineCursor, result.action === 'none' ? null : 'staccato');
-    }
+    const result = controlNoteMenu(path, key);
     menuPath = result.path;
     if (!menuPath) keyHold.reset();
+    if (result.action === 'expression') openExpressionModal();
   }
   let pedalMode = $state(false);
   let pedalCursor = $state(createPedalCursor());
@@ -111,7 +125,32 @@
     }
   }
 
+  let normalizedTrillEdit: {oldNoteId:string;newNoteId:string} | undefined;
   function handleKeydown(event: KeyboardEvent) {
+    const previous=project;
+    normalizedTrillEdit=undefined;
+    try { handleEditorKeydown(event); }
+    finally { if(project!==previous) project=reconcileTrills(previous,project,normalizedTrillEdit); }
+  }
+  function handleEditorKeydown(event: KeyboardEvent) {
+    if (expressionTarget) {
+      if (event.key !== 'Tab') event.preventDefault();
+      if (event.isComposing || event.altKey || event.ctrlKey || event.metaKey || !expressionEditor) return;
+      if (event.key === 'Escape') { closeExpressionModal(); return; }
+      const selected = getLocatedTimelineNote(project.outline, expressionTarget.noteId, expressionTarget.staff);
+      if (!selected) { expressionEditor = { ...expressionEditor, error: 'The selected note is no longer available.' }; return; }
+      if (event.shiftKey && event.key === 'Enter') {
+        if (event.repeat) return;
+        const error = validateExpressionDraft(expressionEditor, selected.note);
+        if (error) { expressionEditor = { ...expressionEditor, error }; return; }
+        project = setFocusedNoteExpressions(project, timelineCursor, {staccato:staccatoFromDraft(expressionEditor),arpeggio:arpeggioFromDraft(expressionEditor)});
+        project = setNoteTrill(project,selected.note.id,trillFromDraft(expressionEditor));
+        closeExpressionModal();
+      } else if (!event.shiftKey && (!event.repeat || ['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(event.key))) {
+        expressionEditor = controlExpressionEditor(expressionEditor, selected.note, event.key);
+      }
+      return;
+    }
     if (menuPath) {
       event.preventDefault();
       if (!event.isComposing && !event.altKey && !event.ctrlKey && !event.metaKey &&
@@ -121,8 +160,13 @@
     const targetElement = event.target;
     if (event.defaultPrevented || event.isComposing || (targetElement instanceof HTMLElement &&
       (targetElement.isContentEditable || targetElement.closest('input, textarea, select')))) return;
+    if (event.key.toLowerCase() === 'b' && !event.ctrlKey && !event.altKey && !event.metaKey) {
+      event.preventDefault();
+      if (!event.repeat) openExpressionModal();
+      return;
+    }
     if (event.key.toLowerCase() === 'm' && !event.ctrlKey && !event.altKey && !event.metaKey) {
-      if (mode === 'timeline' && !pedalMode && selectedTimelineNotes.length === 1) {
+      if (mode === 'timeline' && !pedalMode && !getFocusedGrace(project.outline, timelineCursor) && selectedTimelineNotes.length === 1) {
         event.preventDefault();
         if (!event.repeat) { keyHold.reset(); menuPath = [0]; }
       }
@@ -165,6 +209,36 @@
       event.defaultPrevented || event.isComposing ||
       event.altKey || event.ctrlKey || event.metaKey
     ) return;
+    if (mode === 'timeline' && event.key.toLowerCase() === 'w') {
+      event.preventDefault();
+      if (!event.repeat) {
+        if (event.shiftKey) {
+          const result = addBeforeGrace(project, timelineCursor);
+          if (result) { project = result.project; timelineCursor = result.cursor; }
+        } else timelineCursor = cycleGraceFocus(project.outline, timelineCursor);
+      }
+      return;
+    }
+    if (mode === 'timeline' && getFocusedGrace(project.outline, timelineCursor)) {
+      const key = event.key.toLowerCase();
+      if (key === 'arrowup' || key === 'arrowdown' || key === 'delete' || key === 'escape') {
+        event.preventDefault();
+        if (key === 'escape') timelineCursor = focusGraceParent(project.outline, timelineCursor);
+        else {
+          const result = key === 'delete' ? deleteFocusedGrace(project, timelineCursor) : moveGracePitch(
+            project, timelineCursor, key === 'arrowup' ? 1 : -1, keyHold.diatonicMovement, keyHold.octaveMovement);
+          if (result) { project = result.project; timelineCursor = result.cursor; }
+        }
+        return;
+      }
+      if (key === 'q' || key === 'r' || key === 'arrowleft' || key === 'arrowright') {
+        // Return to the parent before normal navigation; held resize/move never edits it accidentally.
+        if ((key === 'arrowleft' || key === 'arrowright') && (keyHold.noteValueEditing || keyHold.notePositionEditing)) {
+          event.preventDefault(); return;
+        }
+        timelineCursor = focusGraceParent(project.outline, timelineCursor);
+      } else { event.preventDefault(); return; }
+    }
     const isToggleModeKey = event.key.toLowerCase() === 'r';
     const isTupletKey = mode === 'timeline' && (event.key === '/' || event.code === 'NumpadDivide');
     const isVoiceKey = mode === 'timeline' && event.key.toLowerCase() === 'q';
@@ -291,6 +365,8 @@
         : isAddMeasureKey ? appendFocusedTimelineTie(project, timelineCursor)
         : undefined;
       if (result) {
+        if((resize===resizeFocusedTimelineTie && isMoveSectionKey || isNormalizeKey) && timelineCursor.focusedNoteId && result.cursor.focusedNoteId)
+          normalizedTrillEdit={oldNoteId:timelineCursor.focusedNoteId,newNoteId:result.cursor.focusedNoteId};
         project = result.project;
         timelineCursor = result.cursor;
         syncOutlineToTimelinePosition(timelineCursor.positionSixteenths);
@@ -535,19 +611,24 @@
     <OutlinePanel outline={project.outline} cursor={outlineCursor} keyEditing={isEditingInitialKey} tempoEditing={isEditingInitialTempo} meterEditing={isEditingInitialMeter} />
     <TimelinePanel
       outline={project.outline}
+      trills={project.trills}
       cursor={outlineCursor}
       timelineCursor={pedalMode ? { ...timelineCursor, positionSixteenths: pedalCursor.position, focusedNoteId: null, selectionAnchorNoteId: null } : timelineCursor}
       {pedalMode}
       {pedalCursor}
+      expressionModalOpen={expressionTarget !== null}
       mode={mode}
     />
   </main>
 </div>
 
 {#if menuPath && timelineCursor.focusedNoteId}
-  <ArticulationMenu path={menuPath} noteId={timelineCursor.focusedNoteId}
-    current={getLocatedTimelineNote(project.outline, timelineCursor.focusedNoteId, timelineCursor.staff)?.note.articulation}
+  <NoteMenu path={menuPath} noteId={timelineCursor.focusedNoteId}
     choose={(path) => menuKey('Enter', path)} close={closeMenu} />
+{/if}
+{#if expressionTarget && expressionEditor}
+  <ExpressionModal target={expressionTarget} editor={expressionEditor}
+    note={getLocatedTimelineNote(project.outline, expressionTarget.noteId, expressionTarget.staff)!.note} close={closeExpressionModal} />
 {/if}
 
 <style>

@@ -1,3 +1,5 @@
+import { spellPreviewPitch } from './pitch-spelling.ts';
+import { getTrillChain, getTrillAuxiliary } from './trill.ts';
 import { compare, lcm, rational, toNumber } from './rational.ts';
 import { getFlattenedVoiceElements, type KeySignature, type PedalEvent, type PianoPitch, type ScoreProject } from './project.ts';
 
@@ -16,24 +18,9 @@ export function getScorePreviewViewBox(left: number, width: number, top: number,
   };
 }
 
-/** Preview-only spelling. User-controlled enharmonic spelling is still a separate domain task. */
-export function spellPreviewPitch(midi: number, key: KeySignature) {
-  const steps = ['C', 'D', 'E', 'F', 'G', 'A', 'B'];
-  const naturals = [0, 2, 4, 5, 7, 9, 11];
-  const order = key.fifths >= 0 ? [3, 0, 4, 1, 5, 2, 6] : [6, 2, 5, 1, 4, 0, 3];
-  const keyAlter = naturals.map((_, index) => order.slice(0, Math.abs(key.fifths)).includes(index) ? Math.sign(key.fifths) : 0);
-  const candidates = naturals.flatMap((natural, index) => [-2, -1, 0, 1, 2].flatMap((alter) => {
-    const octave = (midi - natural - alter) / 12 - 1;
-    return Number.isInteger(octave) ? [{
-      step: steps[index], alter, octave,
-      cost: Math.abs(alter - keyAlter[index]) * 10 + Math.abs(alter) +
-        (alter !== 0 && Math.sign(alter) !== (key.fifths < 0 ? -1 : 1) ? 1 : 0),
-    }] : [];
-  }));
-  return candidates.sort((a, b) => a.cost - b.cost)[0];
-}
+export { spellPreviewPitch } from './pitch-spelling.ts';
 
-export function createScorePreview(outline: ScoreProject['outline'], activeIndex: number) {
+export function createScorePreview(outline: ScoreProject['outline'], activeIndex: number, trills: ScoreProject['trills'] = []) {
   const measures = outline.filter((block) => block.type === 'measure');
   if (activeIndex < 0 || activeIndex >= measures.length) return null;
   const firstIndex = Math.max(0, activeIndex - 1);
@@ -41,6 +28,25 @@ export function createScorePreview(outline: ScoreProject['outline'], activeIndex
   const visibleIds = new Set(visible.flatMap((measure) => [measure.data.upperStaff, measure.data.lowerStaff]
     .flatMap((staff) => staff.voices.flatMap((voice) => getFlattenedVoiceElements(voice, measure.data.length).map(({ element }) => element.id)))));
   const initial = outline[0].data;
+  const trillByNote = new Map<string, string>();
+  for(const span of trills) {
+    const chain=getTrillChain({outline},span.startNoteId);
+    if(chain.at(-1)?.id!==span.endNoteId || !chain.every(note=>note.pitches.length===1)) continue;
+    const clipped=chain.filter(note=>visibleIds.has(note.id));
+    const auxiliary=getTrillAuxiliary(chain[0].pitches[0].midi,initial.keySignature,span.settings.auxiliary);
+    const keyAux=getTrillAuxiliary(chain[0].pitches[0].midi,initial.keySignature,'diatonic');
+    const accidental=auxiliary.alter!==keyAux.alter ? ['flat-flat','flat','natural','sharp','double-sharp'][auxiliary.alter+2] : undefined;
+    clipped.forEach((note,index)=>{
+      const start=index===0, stop=index===clipped.length-1;
+      const sound=' start-note="'+(span.settings.start==='main'?'main':'upper')+'" beats="'+span.settings.attackCount+'" trill-step="'+(auxiliary.midi-chain[0].pitches[0].midi===1?'half':'whole')+'"';
+      const ornament=(start ? '<trill-mark'+sound+'/>' : '')+
+        (start ? '<wavy-line type="start" number="1"/>' : '')+
+        (!start && !stop ? '<wavy-line type="continue" number="1"/>' : '')+
+        (stop ? '<wavy-line type="stop" number="1"/>' : '')+
+        (start && accidental ? '<accidental-mark placement="above">'+accidental+'</accidental-mark>' : '');
+      trillByNote.set(note.id,ornament);
+    });
+  }
   const noteResolution = visible.reduce((resolution, measure) => [measure.data.upperStaff, measure.data.lowerStaff].reduce((staffResolution, staff) =>
     staff.voices.reduce((voiceResolution, voice) => getFlattenedVoiceElements(voice, measure.data.length).reduce((value, entry) => lcm(value, entry.lengthTime.denominator), voiceResolution), staffResolution), resolution), 2);
   const ticksPerSixteenth = visible.reduce((resolution, measure) =>
@@ -97,12 +103,21 @@ export function createScorePreview(outline: ScoreProject['outline'], activeIndex
           body += `<note>${element.kind === 'measure-rest' ? '<rest measure="yes"/>' : '<rest/>'}<duration>${duration}</duration><voice>${voiceNumber}</voice>${written}${modification}<staff>${staffIndex + 1}</staff>${bracket ? `<notations>${bracket}</notations>` : ''}</note>`;
           continue;
         }
+        for (const grace of element.beforeGraceNotes ?? []) {
+          grace.pitches.forEach((pitch, pitchIndex) => {
+            const fingering = pitch.fingering ? `<notations><technical><fingering>${pitch.fingering}</fingering></technical></notations>` : '';
+            body += `<note><grace slash="${grace.slash ? 'yes' : 'no'}"/>${pitchIndex ? '<chord/>' : ''}${pitchXml(pitch)}` +
+              `<voice>${voiceNumber}</voice><type>${grace.value.type}</type>${'<dot/>'.repeat(grace.value.dots)}<staff>${staffIndex + 1}</staff>${fingering}</note>`;
+          });
+        }
         const from = element.tieFrom !== undefined && visibleIds.has(element.tieFrom);
         const to = element.tieTo !== undefined && visibleIds.has(element.tieTo);
         element.pitches.forEach((pitch, pitchIndex) => {
           const ties = `${from ? '<tie type="stop"/>' : ''}${to ? '<tie type="start"/>' : ''}`;
-          const notations = (pitchIndex === 0 ? bracket : '') + `${from ? '<tied type="stop"/>' : ''}${to ? '<tied type="start"/>' : ''}` +
-            (pitchIndex === 0 && element.articulation === 'staccato' ? '<articulations><staccato/></articulations>' : '') +
+          const notations = (pitchIndex === 0 ? bracket : '') +
+            (pitchIndex === 0 && trillByNote.has(element.id) ? '<ornaments>'+trillByNote.get(element.id)!.replaceAll('number="1"','number="'+voiceNumber+'"')+'</ornaments>' : '') + `${from ? '<tied type="stop"/>' : ''}${to ? '<tied type="start"/>' : ''}` +
+            (pitchIndex === 0 && element.staccato ? `<articulations><${element.staccato.type === 'normal' ? 'staccato' : 'staccatissimo'}/></articulations>` : '') +
+            (element.arpeggio ? `<arpeggiate number="${voiceNumber}"${element.arpeggio.type === 'down' ? ' direction="down"' : ''}/>` : '') +
             (pitch.fingering ? `<technical><fingering>${pitch.fingering}</fingering></technical>` : '');
           body += `<note>${pitchIndex ? '<chord/>' : ''}${pitchXml(pitch)}<duration>${duration}</duration>${ties}<voice>${voiceNumber}</voice>${written}${modification}` +
             (staff.voices.length > 1 ? `<stem>${voiceIndex % 2 === 0 ? 'up' : 'down'}</stem>` : '') +

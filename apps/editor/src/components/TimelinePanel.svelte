@@ -1,19 +1,24 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
+  import { getTrillChain } from '../model/trill';
+  import { getFocusedGrace, getGraceRollLayout } from '../state/grace-input';
   import { getPedalEvents, getPedalSpans, type PedalCursor } from '../state/pedal';
   import ScorePreview from './ScorePreview.svelte';
   import { getFlattenedVoiceElements, getNoteValueLabel, getNoteValueSixteenths, type ScoreProject } from '../model/project';
   import type { OutlineCursor } from '../state/outline-cursor';
   import { getTimelineFixedInputContext, getTimelineInputValue, getTimelineInputSixteenths, getDiatonicPitchClasses, getLocatedTimelineNotes, getSelectedTimelineNotes, getMeasureAtPosition, getOutlinePositionSixteenths, isTimelinePlacementInvalid, type TimelineCursor } from '../state/timeline-cursor';
 
-  let { outline, cursor, timelineCursor, mode, pedalMode = false, pedalCursor }: {
+  let { outline, cursor, timelineCursor, mode, pedalMode = false, pedalCursor, expressionModalOpen = false, trills = [] }: {
     outline: ScoreProject['outline'];
+    trills?: ScoreProject['trills'];
     cursor: OutlineCursor;
     timelineCursor: TimelineCursor;
     mode: 'outline' | 'timeline';
     pedalMode?: boolean;
+    expressionModalOpen?: boolean;
     pedalCursor: PedalCursor;
   } = $props();
+  const trillNotes=$derived(new Map(trills.flatMap(span=>getTrillChain({outline},span.startNoteId).map((note,index)=>[note.id,index===0] as const))));
 
   let measureRow = $state<HTMLDivElement>();
   let pianoRollViewport = $state<HTMLElement>();
@@ -137,6 +142,13 @@
       ));
     })));
   const focusedNote = $derived(locatedNotes.find(({ note }) => note.id === timelineCursor.focusedNoteId));
+  const focusedGrace = $derived(getFocusedGrace(outline, timelineCursor));
+  const focusedGraceX = $derived.by(() => {
+    if (!focusedGrace) return 0;
+    const graces = focusedGrace.parent.note.beforeGraceNotes!;
+    const index = graces.findIndex(grace => grace.id === focusedGrace.grace.id);
+    return getGraceRollLayout(graces.length, pixelsPerSixteenth)[index]?.x ?? 0;
+  });
   const tiePaths = $derived.by(() => {
     const notes = locatedNotes;
     const byId = new Map(notes.map((entry) => [entry.note.id, entry]));
@@ -198,7 +210,7 @@
     if (!header || !roll) return;
 
     let totalWidth = 0;
-    let focusPosition = timelineCursor.positionSixteenths * pixelsPerSixteenth;
+    let focusPosition = timelineCursor.positionSixteenths * pixelsPerSixteenth + (pedalMode ? 0 : focusedGraceX);
     if (!isTimelineMode) {
       focusPosition = 0;
       for (const block of outline) {
@@ -270,7 +282,7 @@
   });
 </script>
 
-<section class="timeline" class:pedal-mode={pedalMode} aria-label="Timeline panel">
+<section class="timeline" class:pedal-mode={pedalMode} class:expression-modal-open={expressionModalOpen} aria-label="Timeline panel">
   <div class="corner" aria-hidden="true"></div>
   <section class="time-header" aria-label="Time header">
     <div class="event-row" aria-label="Event row"></div>
@@ -342,10 +354,10 @@
       {#if mode === 'timeline' && !pedalMode && focusedNote}
         <span
           class="note-value-badge note-focused-value-badge"
-          style={`left: ${(focusedNote.measureStartSixteenths + focusedNote.positionSixteenths) * pixelsPerSixteenth + 4}px; top: ${pitchTopMargin + (108 - timelineCursor.pitch) * pitchRowHeight - 52}px`}
+          style={`left: ${(focusedNote.measureStartSixteenths + focusedNote.positionSixteenths) * pixelsPerSixteenth + focusedGraceX + 4}px; top: ${pitchTopMargin + (108 - timelineCursor.pitch) * pitchRowHeight - 52}px`}
           aria-hidden="true"
         >
-          <span class="focused-note-value">Note {getNoteValueLabel(focusedNote.note.value)}{focusedNote.tuplet ? ' T' : ''}</span>
+          <span class="focused-note-value">{focusedGrace ? 'Grace' : 'Note'} {getNoteValueLabel(focusedGrace?.grace.value ?? focusedNote.note.value)}{!focusedGrace && focusedNote.tuplet ? ' T' : ''}</span>
           <span class:fixed-input={inputTuplet !== undefined}>Input {getNoteValueLabel(inputValue)}{inputTuplet ? ' T' : ''}</span>
         </span>
       {/if}
@@ -387,11 +399,18 @@
           {/each}
           {#each measureNotes[index] as entry (entry.note.id)}
             {@const note = entry.note}
+            {#if trillNotes.has(note.id)}
+              <div class="trill-mark" role="img" aria-label="Trill"
+                class:inactive={pedalMode || mode === 'outline' || entry.staff !== timelineCursor.staff || entry.voiceIndex !== timelineCursor.voiceIndex}
+                style={`left: ${entry.position*pixelsPerSixteenth}px; top: ${pitchTopMargin+(108-note.pitches[0].midi)*pitchRowHeight-21}px; width:${entry.length*pixelsPerSixteenth}px`}>
+                {#if trillNotes.get(note.id)}<span>tr</span>{/if}<span class="trill-wave"></span>
+              </div>
+            {/if}
             {@const activeNoteHeight = entry.length % 4 === 0 ? 24 : entry.length % 2 === 0 ? 18 : 14}
             {#if mode === 'timeline' && !pedalMode && entry.staff === timelineCursor.staff && entry.voiceIndex === timelineCursor.voiceIndex}
               <div
                 class="note-focus-column"
-                class:focused={selectedNoteIds.has(note.id)}
+                class:focused={selectedNoteIds.has(note.id) && !focusedGrace}
                 class:range-selected={selectedNoteIds.has(note.id) && selectedNotes.length > 1}
                 class:range-endpoint={selectedNotes.length > 1 && timelineCursor.focusedNoteId === note.id}
                 style={`left: ${entry.position * pixelsPerSixteenth}px; width: ${entry.length * pixelsPerSixteenth}px`}
@@ -409,9 +428,42 @@
                 class:chromatic={!isDiatonicMidi(pitch.midi)}
                 class:unselected={mode === 'timeline' && entry.staff === timelineCursor.staff && selectedNotes.length <= 1 && timelineCursor.focusedNoteId === note.id && timelineCursor.focusedPitchIndex !== pitchIndex}
                 aria-label={`${entry.staff === 'upperStaff' ? 'Upper' : 'Lower'} staff note ${note.id}`}
-                aria-current={mode === 'timeline' && entry.staff === timelineCursor.staff && timelineCursor.focusedNoteId === note.id && timelineCursor.focusedPitchIndex === pitchIndex ? 'true' : undefined}
+                aria-current={mode === 'timeline' && !pedalMode && !focusedGrace && entry.staff === timelineCursor.staff && timelineCursor.focusedNoteId === note.id && timelineCursor.focusedPitchIndex === pitchIndex ? 'true' : undefined}
                 style={`left: ${entry.position * pixelsPerSixteenth}px; top: ${pitchTopMargin + (108 - pitch.midi) * pitchRowHeight}px; width: ${entry.displayLength * pixelsPerSixteenth}px; --active-note-height: ${activeNoteHeight}px`}
-              >{#if note.articulation === 'staccato' && pitchIndex === 0}<span class="staccato-mark" aria-label="Staccato">•</span>{/if}</div>
+              >{#if note.staccato && pitchIndex === 0}<span class="staccato-mark" aria-label={note.staccato.type === 'normal' ? 'Staccato' : 'Staccatissimo'}>{note.staccato.type === 'normal' ? '•' : '▾'}</span>{/if}</div>
+            {/each}
+            {#if note.arpeggio && note.pitches.length >= 2}
+              {@const topPitch = Math.max(...note.pitches.map(pitch=>pitch.midi))}
+              {@const bottomPitch = Math.min(...note.pitches.map(pitch=>pitch.midi))}
+              {@const markHeight = (topPitch-bottomPitch+1)*pitchRowHeight-4}
+              {@const waveHeight = markHeight-(note.arpeggio.type === 'down' ? 8 : 0)}
+              <svg class="arpeggio-mark" role="img" aria-label={note.arpeggio.type === 'normal' ? 'Arpeggio normal' : 'Arpeggio down'}
+                class:inactive={mode === 'outline' || pedalMode || entry.staff !== timelineCursor.staff || entry.voiceIndex !== timelineCursor.voiceIndex}
+                width="10" height={markHeight} viewBox={`0 0 10 ${markHeight}`}
+                style={`left: ${entry.position*pixelsPerSixteenth+2}px; top: ${pitchTopMargin+(108-topPitch)*pitchRowHeight+2}px`}>
+                <path d={`M 5 1 ${Array.from({length:Math.floor(waveHeight/6)},(_,index)=>`q ${index%2 ? 5 : -5} 3 0 6`).join(' ')}`}></path>
+                {#if note.arpeggio.type === 'down'}<path d={`M 1 ${markHeight-7} L 5 ${markHeight-1} L 9 ${markHeight-7}`}></path>{/if}
+              </svg>
+            {/if}
+            {@const graceLayout = getGraceRollLayout(note.beforeGraceNotes?.length ?? 0, pixelsPerSixteenth)}
+            {#each note.beforeGraceNotes ?? [] as grace, graceIndex (grace.id)}
+              {@const geometry = graceLayout[graceIndex]}
+              {@const graceSelected = mode === 'timeline' && !pedalMode && entry.staff === timelineCursor.staff &&
+                entry.voiceIndex === timelineCursor.voiceIndex && focusedGrace?.grace.id === grace.id}
+              {#if graceSelected}
+                <div class="note-focus-column focused" aria-hidden="true"
+                  style={`left: ${entry.position * pixelsPerSixteenth + geometry.x - geometry.diameter / 2}px; width: ${geometry.diameter}px`}></div>
+              {/if}
+              {#each grace.pitches as pitch, pitchIndex (`${grace.id}-${pitch.midi}`)}
+                <div class="score-grace-note" role="img"
+                  class:diatonic={isDiatonicMidi(pitch.midi)} class:chromatic={!isDiatonicMidi(pitch.midi)}
+                  class:inactive={pedalMode || mode === 'outline' || entry.staff !== timelineCursor.staff || entry.voiceIndex !== timelineCursor.voiceIndex}
+                  class:lower-staff={entry.staff === 'lowerStaff'}
+                  class:timeline-inactive={mode === 'timeline' && (pedalMode || entry.staff !== timelineCursor.staff || entry.voiceIndex !== timelineCursor.voiceIndex)}
+                  aria-label={`${entry.staff === 'upperStaff' ? 'Upper' : 'Lower'} staff grace ${graceIndex + 1} of ${note.id}, MIDI ${pitch.midi}`}
+                  aria-current={graceSelected && pitchIndex === 0 ? 'true' : undefined}
+                  style={`left: ${entry.position * pixelsPerSixteenth + geometry.x - geometry.diameter / 2}px; top: ${pitchTopMargin + (108 - pitch.midi) * pitchRowHeight + (pitchRowHeight - geometry.diameter) / 2}px; width: ${geometry.diameter}px; height: ${geometry.diameter}px`}></div>
+              {/each}
             {/each}
           {/each}
           {#if mode === 'timeline' && !pedalMode && timelineCursor.voiceIndex > 0 && !measure.data[timelineCursor.staff].voices[timelineCursor.voiceIndex]}
@@ -461,7 +513,7 @@
       </div>
     </section>
   {/if}
-  {#if mode === 'timeline'}
+  {#if mode === 'timeline' && !expressionModalOpen}
   <aside class="selection-status" aria-label="Current measure, staff and voice">
     <div class="selection-status-measure">Measure {statusMeasureNumber ?? '—'}</div>
     {#each staffNames as staff (staff)}
@@ -477,19 +529,26 @@
       </div>
     {/each}
   </aside>
-    <ScorePreview {outline} activeIndex={(statusMeasureNumber ?? 0) - 1} />
+    <ScorePreview {outline} {trills} activeIndex={(statusMeasureNumber ?? 0) - 1} />
   {/if}
 </section>
 
 <style>
-  .staccato-mark { position: absolute; left: 50%; top: -12px; transform: translateX(-50%); font-size: 16px; line-height: 12px; color: #243b45; pointer-events: none; }
+  .trill-mark { position:absolute; z-index:7; height:18px; display:flex; align-items:center; color:#243b45; pointer-events:none; font:bold italic 16px Georgia,serif; }
+  .trill-mark.inactive { opacity:0.7; }
+  .trill-wave { flex:1; height:8px; background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8'%3E%3Cpath d='M0 4 Q2 0 4 4 T8 4' fill='none' stroke='%23243b45' stroke-width='1.5'/%3E%3C/svg%3E") repeat-x center; }
+  .staccato-mark { position: absolute; left: 50%; top: -16px; transform: translateX(-50%); font-size: 20px; line-height: 14px; color: #243b45; pointer-events: none; }
+  .arpeggio-mark { position: absolute; z-index: 7; overflow: visible; fill: none; stroke: #243b45; stroke-width: 1.8px; pointer-events: none; }
+  .arpeggio-mark.inactive { opacity: 0.6; }
   .timeline {
+    position: relative;
     display: grid;
     grid-template-columns: var(--pitch-width) minmax(0, 1fr);
     grid-template-rows: var(--timeline-header-height) minmax(0, 1fr);
     min-width: 0;
     min-height: 0;
   }
+  .timeline.expression-modal-open::after { content: ''; position: absolute; inset: 0; z-index: 90; background: rgba(0, 0, 0, 0.55); }
 
   .timeline.pedal-mode { grid-template-rows: var(--timeline-header-height) minmax(0, 1fr) 64px; }
   .pedal-label { grid-row: 3; grid-column: 1; padding: 8px; background: #c2d9db; border-top: 1px solid #829fa2; }
@@ -869,6 +928,13 @@
     border-radius: 2px 8px 8px 2px;
     opacity: 0.92;
   }
+
+  .score-grace-note { position: absolute; z-index: 8; border-radius: 50%; opacity: 0.92; pointer-events: none; }
+  .score-grace-note.diatonic { border: 1px solid #256b32; background: linear-gradient(#85ec84, #32bd47); }
+  .score-grace-note.chromatic { border: 1px solid #806a4e; background: linear-gradient(#d8c3a1, #ab8a61); }
+  .score-grace-note.inactive { border: 0; background: linear-gradient(to bottom, rgb(0, 0, 100), rgb(60, 60, 165) 50%, rgb(0, 0, 100)); opacity: 0.8; }
+  .score-grace-note.inactive.lower-staff { background: linear-gradient(to bottom, rgb(100, 0, 0), rgb(165, 60, 60) 50%, rgb(100, 0, 0)); }
+  .score-grace-note.timeline-inactive { opacity: 0.6; }
 
   .score-note-pitch.diatonic {
     border: 1px solid #256b32;

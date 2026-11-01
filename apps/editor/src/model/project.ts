@@ -19,9 +19,34 @@ export type PianoPitch = {
   fingering?: 1 | 2 | 3 | 4 | 5;
 };
 
+/** Written grace notation, without metrical duration or recursively nested graces. */
+export type PianoGraceNote = {
+  id: string;
+  pitches: PianoPitch[];
+  value: NoteValue;
+  slash: boolean;
+};
+
+export type StaccatoSettings = {
+  type: 'normal' | 'staccatissimo';
+  /** Key-hold duration as a fraction of this written note's performed duration. */
+  lengthRatio: number;
+};
+
+export type ArpeggioSettings = {
+  type: 'normal' | 'down';
+  /** One sixteenth-note window, divided into as many slots as the chord has pitches. */
+  spreadRatio: number;
+  /** 0 aligns the first attack; 1 aligns the last attack to the written onset. */
+  timing: number;
+};
+
 export type PianoNote = {
-  /** One exclusive notation for this written note/chord, not the entire tie chain. */
-  articulation?: 'staccato';
+  /** In performance order, immediately before this written note. */
+  beforeGraceNotes?: PianoGraceNote[];
+  /** Independent of future arpeggio and ornament settings. */
+  staccato?: StaccatoSettings;
+  arpeggio?: ArpeggioSettings;
   id: string;
   kind: 'note';
   value: NoteValue;
@@ -70,7 +95,22 @@ export type MeasureBlock = {
   data: { length: MeasureLength; upperStaff: PianoStaff; lowerStaff: PianoStaff; pedalEvents?: PedalEvent[] };
 };
 export type OutlineBlock = InitialValuesBlock | SectionBlock | MeasureBlock;
-export type ScoreProject = { outline: [InitialValuesBlock, SectionBlock, ...OutlineBlock[]] };
+export type TrillSettings = {
+  auxiliary: 'diatonic' | 'half' | 'whole';
+  start: 'main' | 'auxiliary';
+  attackCount: number;
+};
+export type TrillSpan = {
+  id: string;
+  kind: 'trill';
+  startNoteId: string;
+  endNoteId: string;
+  settings: TrillSettings;
+};
+export type ScoreProject = {
+  outline: [InitialValuesBlock, SectionBlock, ...OutlineBlock[]];
+  trills?: TrillSpan[];
+};
 
 const VALUE_SIXTEENTHS: Record<NoteValue['type'], number> = {
   whole: 16, half: 8, quarter: 4, eighth: 2, '16th': 1, '32nd': 0.5,

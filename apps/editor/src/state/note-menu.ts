@@ -1,19 +1,14 @@
-export type MenuItem = { label: string; children?: MenuItem[]; action?: 'staccato' | 'none' | 'exit' };
-export const articulationItems: MenuItem[] = [
-  { label: 'Staccato', children: [{ label: 'Normal', action: 'staccato' }] },
-  { label: 'None', action: 'none' },
+export type MenuItem = { label: string; children?: MenuItem[]; action?: 'expression' | 'exit' };
+export const noteMenuItems: MenuItem[] = [
+  { label: 'Expression…', action: 'expression' },
   { label: 'Exit', action: 'exit' },
 ];
-export function isMenuItemSelected(item: MenuItem, current?: 'staccato'): boolean {
-  if (item.children) return item.children.some(child => isMenuItemSelected(child, current));
-  return item.action === 'staccato' ? current === 'staccato' : item.action === 'none' && !current;
-}
 export function menuItemsAt(path: number[]) {
-  let items = articulationItems;
+  let items = noteMenuItems;
   for (const index of path.slice(0, -1)) items = items[index]?.children ?? [];
   return items;
 }
-export function controlArticulationMenu(path: number[], key: string): { path: number[] | null; action?: MenuItem['action'] } {
+export function controlNoteMenu(path: number[], key: string): { path: number[] | null; action?: MenuItem['action'] } {
   const items = menuItemsAt(path), index = path.at(-1)!, item = items[index];
   if (key === 'Escape' || key.toLowerCase() === 'm') return { path: null };
   if (key === 'ArrowUp' || key === 'ArrowDown') return { path: [...path.slice(0, -1), Math.max(0, Math.min(items.length - 1, index + (key === 'ArrowUp' ? -1 : 1)))] };
