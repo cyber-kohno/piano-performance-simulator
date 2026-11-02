@@ -1,6 +1,7 @@
 import { createRestElements, createRestId, getFlattenedVoiceElements, getLocatedVoiceElements, getNoteValueSixteenths, isOnEditingGrid, reconcileOutlineTies, type NoteValue, type OutlineBlock, type PianoNote, type PianoRest, type PianoTuplet, type PianoVoiceElement, type ScoreProject } from '../model/project.ts';
 import { addTime, compareTime, fromNumber, multiply, rational, toNumber } from '../model/rational.ts';
 import { hasCrossVoicePitchCollision } from '../model/pitch-collision.ts';
+import { crossesStationaryNote } from './movement-order.ts';
 import type { TimelineCursor } from './timeline-cursor.ts';
 
 export function getTupletContexts(outline: readonly OutlineBlock[], cursor: TimelineCursor) {
@@ -178,6 +179,7 @@ export function moveTupletSelection(project: ScoreProject, cursor: TimelineCurso
   // One group's partial selection (including a sole focused note) still moves internally.
   if (groups.length === 1 && groupedCount === ids.size && !(ids.size > 1 && groups[0].complete)) {
     const { context, notes } = groups[0];
+    if (crossesStationaryNote(notes.filter(entry => ids.has(entry.note.id)), notes.filter(entry => !ids.has(entry.note.id)), direction * context.base)) return undefined;
     const shifted = notes.map((entry) => ids.has(entry.note.id) ? { ...entry, start: entry.start + direction * context.base } : entry);
     if (shifted.some((entry) => entry.start < 0)) return undefined;
     const group = writeGroup(context, shifted);
@@ -204,6 +206,17 @@ export function moveTupletSelection(project: ScoreProject, cursor: TimelineCurso
   const shift = direction * getNoteValueSixteenths(cursor.placementValue);
   if (!isOnEditingGrid(shift) || shift === 0) return undefined;
   const movingIds = new Set(atoms.map(({ element }) => element.id));
+  let stationaryStart = 0;
+  const stationary = project.outline.flatMap(block => {
+    if (block.type !== 'measure') return [];
+    const start = stationaryStart;
+    stationaryStart = addTime(start, block.data.length.cnt / block.data.length.unit * 16);
+    const voice = block.data[cursor.staff].voices[cursor.voiceIndex];
+    return voice ? getFlattenedVoiceElements(voice, block.data.length).flatMap(entry =>
+      entry.element.kind === 'note' && !ids.has(entry.element.id)
+        ? [{ start: addTime(start, entry.positionSixteenths), length: entry.lengthSixteenths }] : []) : [];
+  });
+  if (crossesStationaryNote(atoms, stationary, shift)) return undefined;
   // Vacate every source before placing any destination, allowing overlapping range moves.
   let outline = project.outline.map((block) => block.type !== 'measure' ? block : {
     ...block, data: { ...block.data, [cursor.staff]: { ...block.data[cursor.staff], voices: block.data[cursor.staff].voices.map((voice, index) => index !== cursor.voiceIndex ? voice : {

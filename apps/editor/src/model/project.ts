@@ -94,7 +94,8 @@ export type MeasureBlock = {
   type: 'measure';
   data: { length: MeasureLength; upperStaff: PianoStaff; lowerStaff: PianoStaff; pedalEvents?: PedalEvent[] };
 };
-export type OutlineBlock = InitialValuesBlock | SectionBlock | MeasureBlock;
+export type KeyChangeBlock = { id: string; type: 'key-change'; data: { keySignature: KeySignature } };
+export type OutlineBlock = InitialValuesBlock | SectionBlock | MeasureBlock | KeyChangeBlock;
 export type TrillSettings = {
   auxiliary: 'diatonic' | 'half' | 'whole';
   start: 'main' | 'auxiliary';
@@ -108,6 +109,10 @@ export type TrillSpan = {
   settings: TrillSettings;
 };
 export type ScoreProject = {
+  slurs?: { id: string; startNoteId: string; endNoteId: string }[];
+  clefChanges?: { noteId: string; clef: 'treble' | 'bass' }[];
+  /** Global changes anchored to upper-staff voice-1 written notes. */
+  tempoChanges?: { noteId: string; bpm: number }[];
   outline: [InitialValuesBlock, SectionBlock, ...OutlineBlock[]];
   trills?: TrillSpan[];
 };

@@ -5,9 +5,14 @@
   import TimelinePanel from './components/TimelinePanel.svelte';
   import NoteMenu from './components/NoteMenu.svelte';
   import ExpressionModal from './components/ExpressionModal.svelte';
+  import { getTempoAt, setNoteTempo, reconcileTempoChanges } from './model/tempo';
+  import { createChangesEditor, controlChangesEditor } from './state/changes-editor';
+  import { getClefAt, setNoteClef, reconcileClefChanges } from './model/clef';
+  import { getKeySignatureAt, buildMeasureKeyCache } from './model/key-signature';
   import { createExpressionEditor, controlExpressionEditor, validateExpressionDraft, staccatoFromDraft, arpeggioFromDraft, trillFromDraft, type ExpressionEditor } from './state/expression-editor';
   import { getNoteTrill, getTrillChain, setNoteTrill, reconcileTrills } from './model/trill';
-  import { controlNoteMenu } from './state/note-menu';
+  import { controlNoteMenu, createNoteMenuItems } from './state/note-menu';
+  import { addSlur, removeSlur, reconcileSlurs } from './model/slur';
   import { addTime } from './model/rational';
   import { createProject, type ScoreProject } from './model/project';
   import { createKeyHold } from './state/key-hold.svelte';
@@ -29,6 +34,7 @@
     addTimelineNoteAt,
     findTimelineNoteAtMove,
     getLocatedTimelineNote,
+    getMeasureAtPosition,
     getOutlineBlockAtPosition,
     getOutlinePositionSixteenths,
     getTimelineLengthSixteenths,
@@ -57,7 +63,8 @@
     deleteOutlineBlock,
     moveOutlineCursor,
     moveOutlineSection,
-    changeInitialKeySignature,
+    changeOutlineKeySignature,
+    addKeyChangeAfterCursor,
     changeInitialTempo,
     changeInitialMeter,
     changeOutlineMeasureBeats,
@@ -72,9 +79,17 @@
   let menuPath = $state<number[] | null>(null);
   let expressionTarget = $state<{ noteId: string; measureNumber: number; staff: 'upperStaff' | 'lowerStaff'; voice: number; trillNoteCount: number } | null>(null);
   let expressionEditor = $state<ExpressionEditor | null>(null);
+  let noteTab = $state<'expression' | 'changes'>('expression');
+  let changesEditor = $state(createChangesEditor(undefined, 100, undefined, 'treble'));
   function openExpressionModal() {
     if (mode !== 'timeline' || pedalMode || getFocusedGrace(project.outline, timelineCursor) || selectedTimelineNotes.length !== 1) return;
     const target = selectedTimelineNotes[0];
+    noteTab = 'expression';
+    const tempo = project.tempoChanges?.find(change => change.noteId === target.note.id);
+    changesEditor = createChangesEditor(tempo?.bpm,
+      getTempoAt(project, addTime(target.measureStartSixteenths, target.positionSixteenths)),
+      project.clefChanges?.find(change => change.noteId === target.note.id)?.clef,
+      getClefAt(project, timelineCursor.staff, addTime(target.measureStartSixteenths, target.positionSixteenths)));
     expressionEditor = createExpressionEditor(target.note,getNoteTrill(project,target.note.id)?.settings);
     expressionTarget = { noteId: target.note.id, staff: timelineCursor.staff, voice: target.voiceIndex + 1,
       trillNoteCount:getTrillChain(project,target.note.id).length,
@@ -85,20 +100,24 @@
   function closeMenu() { menuPath = null; keyHold.reset(); }
   function menuKey(key: string, path = menuPath) {
     if (!path) return;
-    const result = controlNoteMenu(path, key);
+    const ids = selectedTimelineNotes.map(entry => entry.note.id);
+    const result = controlNoteMenu(path, key, createNoteMenuItems(project, ids));
     menuPath = result.path;
     if (!menuPath) keyHold.reset();
     if (result.action === 'expression') openExpressionModal();
+    if (result.action === 'add-slur') project = addSlur(project, ids);
+    if (result.action === 'remove-slur') project = removeSlur(project, ids);
   }
   let pedalMode = $state(false);
   let pedalCursor = $state(createPedalCursor());
   const isEditingInitialKey = $derived(mode === 'outline' &&
-    outlineCursor.blockId === project.outline[0].id && keyHold.keySignatureEditing);
+    project.outline.some(block => block.id === outlineCursor.blockId && (block.type === 'init' || block.type === 'key-change')) && keyHold.keySignatureEditing);
   const isEditingInitialTempo = $derived(mode === 'outline' &&
     outlineCursor.blockId === project.outline[0].id && keyHold.tempoEditing && !keyHold.keySignatureEditing);
   const isEditingInitialMeter = $derived(mode === 'outline' &&
     outlineCursor.blockId === project.outline[0].id && keyHold.meterEditing && !keyHold.tempoEditing && !keyHold.keySignatureEditing);
   const selectedTimelineNotes = $derived(getSelectedTimelineNotes(project.outline, timelineCursor));
+  const measureKeyCache = $derived(buildMeasureKeyCache(project.outline));
 
   const pitchClassNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 
@@ -113,7 +132,10 @@
   }
 
   function movePitch(direction: -1 | 1, diatonic = false, octave = false) {
-    const keySignature = diatonic ? project.outline[0].data.keySignature : undefined;
+    const measure = timelineCursor.focusedNoteId
+      ? getLocatedTimelineNote(project.outline, timelineCursor.focusedNoteId, timelineCursor.staff)?.measure
+      : getMeasureAtPosition(project.outline, timelineCursor.positionSixteenths)?.measure;
+    const keySignature = diatonic ? (measure && measureKeyCache.get(measure.id)?.keySignature) ?? getKeySignatureAt(project.outline, timelineCursor.positionSixteenths) : undefined;
     if (timelineCursor.focusedNoteId === null) {
       timelineCursor = moveTimelineCursorPitch(timelineCursor, direction, keySignature);
     } else {
@@ -130,13 +152,17 @@
     const previous=project;
     normalizedTrillEdit=undefined;
     try { handleEditorKeydown(event); }
-    finally { if(project!==previous) project=reconcileTrills(previous,project,normalizedTrillEdit); }
+    finally { if(project!==previous) project=reconcileSlurs(reconcileClefChanges(reconcileTempoChanges(reconcileTrills(previous,project,normalizedTrillEdit)))); }
   }
   function handleEditorKeydown(event: KeyboardEvent) {
     if (expressionTarget) {
-      if (event.key !== 'Tab') event.preventDefault();
+      event.preventDefault();
       if (event.isComposing || event.altKey || event.ctrlKey || event.metaKey || !expressionEditor) return;
       if (event.key === 'Escape') { closeExpressionModal(); return; }
+      if (event.key === 'Tab') {
+        if (!event.repeat) noteTab = noteTab === 'expression' ? 'changes' : 'expression';
+        return;
+      }
       const selected = getLocatedTimelineNote(project.outline, expressionTarget.noteId, expressionTarget.staff);
       if (!selected) { expressionEditor = { ...expressionEditor, error: 'The selected note is no longer available.' }; return; }
       if (event.shiftKey && event.key === 'Enter') {
@@ -145,9 +171,15 @@
         if (error) { expressionEditor = { ...expressionEditor, error }; return; }
         project = setFocusedNoteExpressions(project, timelineCursor, {staccato:staccatoFromDraft(expressionEditor),arpeggio:arpeggioFromDraft(expressionEditor)});
         project = setNoteTrill(project,selected.note.id,trillFromDraft(expressionEditor));
+        if (expressionTarget.staff === 'upperStaff' && expressionTarget.voice === 1) {
+          project = setNoteTempo(project, expressionTarget.noteId, changesEditor.tempo.bpm);
+        }
+        if (expressionTarget.voice === 1) project = setNoteClef(project, expressionTarget.noteId, changesEditor.clef);
         closeExpressionModal();
       } else if (!event.shiftKey && (!event.repeat || ['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(event.key))) {
-        expressionEditor = controlExpressionEditor(expressionEditor, selected.note, event.key);
+        if (noteTab === 'expression') expressionEditor = controlExpressionEditor(expressionEditor, selected.note, event.key);
+        else changesEditor = controlChangesEditor(changesEditor, event.key,
+          expressionTarget.staff === 'upperStaff' && expressionTarget.voice === 1, expressionTarget.voice === 1);
       }
       return;
     }
@@ -166,7 +198,7 @@
       return;
     }
     if (event.key.toLowerCase() === 'm' && !event.ctrlKey && !event.altKey && !event.metaKey) {
-      if (mode === 'timeline' && !pedalMode && !getFocusedGrace(project.outline, timelineCursor) && selectedTimelineNotes.length === 1) {
+      if (mode === 'timeline' && !pedalMode && !getFocusedGrace(project.outline, timelineCursor) && selectedTimelineNotes.length >= 1) {
         event.preventDefault();
         if (!event.repeat) { keyHold.reset(); menuPath = [0]; }
       }
@@ -246,6 +278,7 @@
     const isMoveSectionKey = event.key === 'ArrowLeft' || event.key === 'ArrowRight';
     const isAddMeasureKey = event.key.toLowerCase() === 'a';
     const isAddSectionKey = event.key.toLowerCase() === 's';
+    const isAddKeyChangeKey = mode === 'outline' && event.key.toLowerCase() === 'x';
     const isDeleteKey = event.key === 'Delete';
     const isEscapeKey = mode === 'timeline' && event.key === 'Escape';
     const isToggleAdjacentTieKey = mode === 'timeline' && (event.key === '=' || event.code === 'Equal');
@@ -258,7 +291,7 @@
       : undefined;
     const isDotKey = dotInput !== undefined;
     const isNormalizeKey = mode === 'timeline' && keyHold.noteValueEditing && event.key === 'Enter';
-    if (!isTupletKey && !isNormalizeKey && !isVoiceKey && !isToggleModeKey && !isMoveKey && !isMoveSectionKey && !isAddMeasureKey && !isAddSectionKey && !isDeleteKey && !isCursorUnitKey && !isDotKey && !isToggleAdjacentTieKey && !isEscapeKey) return;
+    if (!isAddKeyChangeKey && !isTupletKey && !isNormalizeKey && !isVoiceKey && !isToggleModeKey && !isMoveKey && !isMoveSectionKey && !isAddMeasureKey && !isAddSectionKey && !isDeleteKey && !isCursorUnitKey && !isDotKey && !isToggleAdjacentTieKey && !isEscapeKey) return;
 
     const target = event.target;
     if (target instanceof HTMLElement && (
@@ -275,7 +308,7 @@
     }
     if (mode === 'outline' && keyHold.keySignatureEditing) {
       if (isMoveSectionKey) {
-        const outline = changeInitialKeySignature(project.outline, outlineCursor, event.key === 'ArrowLeft' ? -1 : 1);
+        const outline = changeOutlineKeySignature(project.outline, outlineCursor, event.key === 'ArrowLeft' ? -1 : 1);
         if (outline !== project.outline) project = { ...project, outline };
       }
       return;
@@ -568,6 +601,12 @@
       };
       return;
     }
+    if (isAddKeyChangeKey) {
+      const result = addKeyChangeAfterCursor(project.outline, outlineCursor);
+      project = { ...project, outline: result.outline };
+      outlineCursor = result.cursor;
+      return;
+    }
 
     if (isMoveSectionKey) {
       outlineCursor = moveOutlineSection(
@@ -617,17 +656,20 @@
       {pedalMode}
       {pedalCursor}
       expressionModalOpen={expressionTarget !== null}
+      tempoChanges={project.tempoChanges} clefChanges={project.clefChanges}
+      slurs={project.slurs}
       mode={mode}
     />
   </main>
 </div>
 
 {#if menuPath && timelineCursor.focusedNoteId}
-  <NoteMenu path={menuPath} noteId={timelineCursor.focusedNoteId}
+  <NoteMenu path={menuPath} noteId={timelineCursor.focusedNoteId} items={createNoteMenuItems(project, selectedTimelineNotes.map(entry => entry.note.id))}
     choose={(path) => menuKey('Enter', path)} close={closeMenu} />
 {/if}
 {#if expressionTarget && expressionEditor}
   <ExpressionModal target={expressionTarget} editor={expressionEditor}
+    tab={noteTab} {changesEditor} selectTab={(tab) => { noteTab = tab; }}
     note={getLocatedTimelineNote(project.outline, expressionTarget.noteId, expressionTarget.staff)!.note} close={closeExpressionModal} />
 {/if}
 

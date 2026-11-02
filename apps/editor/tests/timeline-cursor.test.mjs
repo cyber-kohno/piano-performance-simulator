@@ -695,18 +695,14 @@ test('D movement uses the input unit and retains chord spelling, identity, finge
   assert.deepEqual(state.project, before);
 });
 
-test('moving over a note into an empty destination preserves the intervening note and rest spelling', () => {
+test('moving over a note into an empty destination is rejected without changing notes or rests', () => {
   const first = singleNote();
   const other = addTimelineNoteAt(first.project, first.cursor, 2, 72);
-  const gap = getLocatedVoiceElements(voiceOf(other.project), other.project.outline[2].data.length)
-    .filter((entry) => entry.positionSixteenths >= 1 && entry.positionSixteenths + entry.lengthSixteenths <= 4).map((entry) => entry.element);
+  const before = structuredClone(other.project);
   const moved = moveFocusedTimelineNote(other.project, setTimelineCursorUnit(first.cursor, '3'), 1);
-  assert.equal(moved.cursor.positionSixteenths, 4);
-  assert.equal(getLocatedTimelineNote(moved.project.outline, other.cursor.focusedNoteId).positionSixteenths, 2);
-  const afterGap = getLocatedVoiceElements(voiceOf(moved.project), moved.project.outline[2].data.length)
-    .filter((entry) => entry.positionSixteenths >= 1 && entry.positionSixteenths + entry.lengthSixteenths <= 4).map((entry) => entry.element);
-  assert.deepEqual(afterGap, gap);
-  assertComplete(moved.project);
+  assert.equal(moved, undefined);
+  assert.deepEqual(other.project, before);
+  assertComplete(other.project);
 });
 
 test('movement permits touching another note but rejects overlapping destinations without edits', () => {

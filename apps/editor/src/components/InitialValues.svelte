@@ -1,8 +1,8 @@
 <script lang="ts">
   import type { InitialValues } from '../model/project';
 
-  let { values, keyEditing = false, tempoEditing = false, meterEditing = false }: {
-    values: InitialValues; keyEditing?: boolean; tempoEditing?: boolean; meterEditing?: boolean;
+  let { values, keyEditing = false, tempoEditing = false, meterEditing = false, keyOnly = false }: {
+    values: InitialValues; keyEditing?: boolean; tempoEditing?: boolean; meterEditing?: boolean; keyOnly?: boolean;
   } = $props();
 
   const keySignatureText = $derived.by(() => {
@@ -30,7 +30,7 @@
     <dt>Key</dt>
     <dd>{keySignatureText}</dd>
   </div>
-  <div class:editing={meterEditing}>
+  {#if !keyOnly}<div class:editing={meterEditing}>
     <dt>Meter</dt>
     <dd>{values.timeSignature.cnt}/{values.timeSignature.unit}</dd>
   </div>
@@ -38,6 +38,7 @@
     <dt>Tempo</dt>
     <dd>{beatUnitText} = {values.tempo}</dd>
   </div>
+  {/if}
 </dl>
 
 <style>

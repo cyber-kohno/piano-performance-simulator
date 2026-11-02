@@ -5,6 +5,7 @@ import {
 import { getMeterBeatLength } from './measure-beats.ts';
 import { reconcilePedalOutline } from './pedal.ts';
 import { toNumber } from '../model/rational.ts';
+import { getKeySignatureForBlock } from '../model/key-signature.ts';
 
 /** Transient editing state, separate from the saved project data. */
 export type OutlineCursor = {
@@ -35,6 +36,26 @@ export function changeInitialKeySignature(
     ...initial,
     data: { ...initial.data, keySignature: { ...initial.data.keySignature, fifths } },
   }, ...outline.slice(1)] as ScoreProject['outline'];
+}
+
+export function changeOutlineKeySignature(outline: ScoreProject['outline'], cursor: OutlineCursor, direction: -1 | 1): ScoreProject['outline'] {
+  const block = outline.find(entry => entry.id === cursor.blockId);
+  if (block?.type === 'init') return changeInitialKeySignature(outline, cursor, direction);
+  if (block?.type !== 'key-change') return outline;
+  const index = INITIAL_KEY_SIGNATURE_ORDER.indexOf(block.data.keySignature.fifths);
+  if (index < 0) return outline;
+  const fifths = INITIAL_KEY_SIGNATURE_ORDER[(index + direction + INITIAL_KEY_SIGNATURE_ORDER.length) % INITIAL_KEY_SIGNATURE_ORDER.length];
+  return outline.map(entry => entry.id === block.id ? { ...block, data: { keySignature: { fifths } } } : entry) as ScoreProject['outline'];
+}
+
+export function addKeyChangeAfterCursor(outline: ScoreProject['outline'], cursor: OutlineCursor) {
+  const index = outline.findIndex(entry => entry.id === cursor.blockId);
+  // Keep the required leading section, just as measure insertion does.
+  if (index < 1) return { outline, cursor };
+  const block = { id: `key-change-${crypto.randomUUID()}`, type: 'key-change' as const,
+    data: { keySignature: { ...getKeySignatureForBlock(outline, cursor.blockId) } } };
+  const next = [...outline]; next.splice(index + 1, 0, block);
+  return { outline: next as ScoreProject['outline'], cursor: { blockId: block.id } };
 }
 
 export function changeInitialTempo(

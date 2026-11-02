@@ -7,6 +7,7 @@ import {
 import { addTime, compareTime } from '../model/rational.ts';
 import { getTupletContext, getTupletContexts, getTupletPlacement, addTupletTimelineNote, setTupletNoteValue, resizeTupletNote, moveTupletSelection, isFullTupletSelection } from './tuplet-input.ts';
 import { hasCrossVoicePitchCollision } from '../model/pitch-collision.ts';
+import { crossesStationaryNote } from './movement-order.ts';
 import { canApplyArpeggio, isValidArpeggio } from '../model/arpeggio.ts';
 
 export { convertFocusedTimelineTuplet } from './tuplet-input.ts';
@@ -24,15 +25,8 @@ export const TIMELINE_CURSOR_UNITS = [
   { key: '4', type: '32nd' },
 ] as const;
 
-export function getDiatonicPitchClasses(keySignature: KeySignature): Set<number> {
-  const naturalPitchClasses = [0, 2, 4, 5, 7, 9, 11];
-  const fifths = keySignature.fifths;
-  const order = fifths >= 0 ? [3, 0, 4, 1, 5, 2, 6] : [6, 2, 5, 1, 4, 0, 3];
-  const altered = new Set(order.slice(0, Math.abs(fifths)));
-  return new Set(naturalPitchClasses.map((pitch, step) =>
-    (pitch + (altered.has(step) ? Math.sign(fifths) : 0) + 12) % 12,
-  ));
-}
+export { getDiatonicPitchClasses } from '../model/key-signature.ts';
+import { getDiatonicPitchClasses } from '../model/key-signature.ts';
 
 function findNextPitch(
   pitch: number, direction: -1 | 1, keySignature?: KeySignature,
@@ -749,7 +743,9 @@ function rewriteFocusedTimelineTie(
   // Preserve finger changes as boundaries that normalization cannot merge across.
   const groups: { start: number; pitches: PianoNote['pitches'] }[] = [];
   for (const entry of chain) {
-    if (!groups.length || entry.note.staccato || entry.note.arpeggio || entry.note.beforeGraceNotes?.length || !samePitches(groups[groups.length - 1].pitches, entry.note.pitches)) {
+    const previousId = chain[chain.indexOf(entry) - 1]?.note.id;
+    const slurBoundary = project.slurs?.some(slur => slur.startNoteId === entry.note.id || slur.endNoteId === entry.note.id || slur.endNoteId === previousId);
+    if (!groups.length || slurBoundary || project.tempoChanges?.some(change => change.noteId === entry.note.id) || project.clefChanges?.some(change => change.noteId === entry.note.id) || entry.note.staccato || entry.note.arpeggio || entry.note.beforeGraceNotes?.length || !samePitches(groups[groups.length - 1].pitches, entry.note.pitches)) {
       groups.push({ start: entry.measureStartSixteenths + entry.positionSixteenths, pitches: entry.note.pitches });
     }
   }
@@ -839,6 +835,10 @@ export function moveFocusedTimelineNote(
   const ids = new Set(chain.map(({ note }) => note.id));
   const plans: { measureId: string; position: number; onset: number; note: PianoNote }[] = [];
   const others = getLocatedTimelineNotes(project.outline, cursor.staff, cursor.voiceIndex).filter(({ note }) => !ids.has(note.id));
+  if (crossesStationaryNote(
+    chain.map(entry => ({ start: addTime(entry.measureStartSixteenths, entry.positionSixteenths), length: entry.lengthSixteenths })),
+    others.map(entry => ({ start: addTime(entry.measureStartSixteenths, entry.positionSixteenths), length: entry.lengthSixteenths })), shift,
+  )) return undefined;
   for (const entry of chain) {
     const onset = entry.measureStartSixteenths + entry.positionSixteenths + shift;
     const length = entry.lengthSixteenths;

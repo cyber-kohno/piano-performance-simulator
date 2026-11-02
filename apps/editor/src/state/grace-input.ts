@@ -49,7 +49,7 @@ export function moveGracePitch(project: ScoreProject, cursor: TimelineCursor, di
   const selected = getFocusedGrace(project.outline, cursor);
   if (!selected) return undefined;
   const pitch = octave ? selected.grace.pitches[0].midi + direction * 12 : moveTimelineCursorPitch(
-    { ...cursor, pitch: selected.grace.pitches[0].midi }, direction, diatonic ? project.outline[0].data.keySignature : undefined).pitch;
+    { ...cursor, pitch: selected.grace.pitches[0].midi }, direction, diatonic ? getKeySignatureForBlock(project.outline, selected.parent.measure.id) : undefined).pitch;
   if (pitch < 21 || pitch > 108 || pitch === selected.grace.pitches[0].midi) return undefined;
   const beforeGraceNotes = selected.parent.note.beforeGraceNotes!.map(grace => grace.id !== selected.grace.id ? grace : {
     ...grace, pitches: [{ ...grace.pitches[0], midi: pitch }],
@@ -72,3 +72,4 @@ export function getGraceRollLayout(count: number, pixelsPerSixteenth: number) {
   const diameter = Math.max(4, Math.min(18 / Math.sqrt(Math.max(1, count)), cell - 2));
   return Array.from({ length: count }, (_, index) => ({ x: cell * (index + 1), diameter }));
 }
+import { getKeySignatureForBlock } from '../model/key-signature.ts';

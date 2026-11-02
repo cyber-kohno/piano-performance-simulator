@@ -6,18 +6,18 @@ import { createTimelineCursor, addTimelineNoteAt, appendFocusedTimelineTie, setF
 import { createScorePreview } from '../src/model/score-preview.ts';
 
 test('note menu opens Expression instead of modifying staccato', () => {
-  assert.deepEqual(noteMenuItems.map(item => item.action), ['expression', 'exit']);
+  assert.deepEqual(noteMenuItems.map(item => item.action), ['expression', 'add-slur', 'remove-slur', 'exit']);
   assert.deepEqual(controlNoteMenu([0], 'Enter'), { path: null, action: 'expression' });
   assert.equal(menuItemsAt([0])[0].label, 'Expression…');
 });
 
 test('note menu navigation clamps, closes and keeps parent navigation available for future actions', () => {
   assert.deepEqual(controlNoteMenu([0], 'ArrowUp').path, [0]);
-  assert.deepEqual(controlNoteMenu([1], 'ArrowDown').path, [1]);
+  assert.deepEqual(controlNoteMenu([3], 'ArrowDown').path, [3]);
   assert.deepEqual(controlNoteMenu([0], 'ArrowLeft').path, [0]);
   assert.deepEqual(controlNoteMenu([0], 'ArrowRight').path, [0]);
   for (const key of ['Escape', 'm', 'M']) assert.equal(controlNoteMenu([0], key).path, null);
-  assert.deepEqual(controlNoteMenu([1], 'Enter'), { path: null, action: 'exit' });
+  assert.deepEqual(controlNoteMenu([3], 'Enter'), { path: null, action: 'exit' });
   assert.deepEqual(controlNoteMenu([0], 'Delete').path, [0]);
 });
 

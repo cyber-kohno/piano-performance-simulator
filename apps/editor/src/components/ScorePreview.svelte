@@ -2,11 +2,14 @@
   import { createScorePreview, getScorePreviewViewBox } from '../model/score-preview';
   import { drawPreviewPedals } from '../model/score-preview-pedal';
   import type { ScoreProject } from '../model/project';
+  import { mapPreviewNotes, createPreviewSelectionPainter } from '../model/score-preview-selection';
 
-  let { outline, activeIndex, trills }: { outline: ScoreProject['outline']; activeIndex: number; trills?: ScoreProject['trills'] } = $props();
+  let { outline, activeIndex, trills, tempoChanges, clefChanges, slurs, selectedNoteIds = [] }: { outline: ScoreProject['outline']; activeIndex: number; trills?: ScoreProject['trills']; tempoChanges?: ScoreProject['tempoChanges']; clefChanges?: ScoreProject['clefChanges']; slurs?: ScoreProject['slurs']; selectedNoteIds?: string[] } = $props();
   let host = $state<HTMLDivElement>();
   let message = $state<string | null>(null);
-  const preview = $derived(createScorePreview(outline, activeIndex, trills));
+  let paintSelection = $state<((ids: readonly string[]) => void) | null>(null);
+  $effect(() => { paintSelection?.(selectedNoteIds); });
+  const preview = $derived(createScorePreview(outline, activeIndex, trills, tempoChanges, clefChanges, slurs));
   const xml = $derived(preview?.xml ?? null);
   const activeOffset = $derived(preview?.activeOffset ?? 0);
 
@@ -15,6 +18,8 @@
     const source = xml;
     const offset = activeOffset;
     const pedalEvents = preview?.pedals ?? [];
+    const noteTargets = preview?.noteTargets ?? [];
+    paintSelection = null;
     if (!target) return;
     if (!source) {
       target.replaceChildren();
@@ -46,6 +51,7 @@
         const svg = stage.querySelector('svg');
         const measure = renderer.GraphicSheet.MeasureList[offset]?.[0];
         if (!svg || !measure) throw new Error('Missing rendered measure');
+        const painter = createPreviewSelectionPainter(mapPreviewNotes(renderer, noteTargets));
         drawPreviewPedals(svg, renderer, pedalEvents);
         // OSMD positions use staff-space units; its default SVG uses ten pixels per unit.
         const box = measure.PositionAndShape;
@@ -67,6 +73,7 @@
         highlight.setAttribute('fill', '#fff3b5');
         svg.prepend(highlight);
         target.replaceChildren(svg);
+        paintSelection = painter;
         message = null;
       } catch (error) {
         if (!cancelled) {

@@ -4,11 +4,16 @@
   import { getFocusedGrace, getGraceRollLayout } from '../state/grace-input';
   import { getPedalEvents, getPedalSpans, type PedalCursor } from '../state/pedal';
   import ScorePreview from './ScorePreview.svelte';
+  import { getSlurRanges } from '../model/slur';
+  import { buildMeasureKeyCache, isDiatonicInMeasure } from '../model/key-signature';
   import { getFlattenedVoiceElements, getNoteValueLabel, getNoteValueSixteenths, type ScoreProject } from '../model/project';
   import type { OutlineCursor } from '../state/outline-cursor';
-  import { getTimelineFixedInputContext, getTimelineInputValue, getTimelineInputSixteenths, getDiatonicPitchClasses, getLocatedTimelineNotes, getSelectedTimelineNotes, getMeasureAtPosition, getOutlinePositionSixteenths, isTimelinePlacementInvalid, type TimelineCursor } from '../state/timeline-cursor';
+  import { getTimelineFixedInputContext, getTimelineInputValue, getTimelineInputSixteenths, getLocatedTimelineNotes, getSelectedTimelineNotes, getMeasureAtPosition, getOutlinePositionSixteenths, isTimelinePlacementInvalid, type TimelineCursor } from '../state/timeline-cursor';
 
-  let { outline, cursor, timelineCursor, mode, pedalMode = false, pedalCursor, expressionModalOpen = false, trills = [] }: {
+  let { outline, cursor, timelineCursor, mode, pedalMode = false, pedalCursor, expressionModalOpen = false, trills = [], tempoChanges = [], clefChanges = [], slurs = [] }: {
+    slurs?: ScoreProject['slurs'];
+    tempoChanges?: ScoreProject['tempoChanges'];
+    clefChanges?: ScoreProject['clefChanges'];
     outline: ScoreProject['outline'];
     trills?: ScoreProject['trills'];
     cursor: OutlineCursor;
@@ -97,10 +102,7 @@
   const inputValue = $derived(getTimelineInputValue(timelineCursor, outline));
   const inputTuplet = $derived(getTimelineFixedInputContext(timelineCursor, outline));
   const cursorWidth = $derived(getTimelineInputSixteenths(timelineCursor, outline) * pixelsPerSixteenth);
-  function isDiatonicMidi(midi: number) {
-    const pitchClass = ((midi % 12) + 12) % 12;
-    return pitches.find((pitch) => pitch.midi % 12 === pitchClass)?.isDiatonic ?? false;
-  }
+  const measureKeyCache = $derived(buildMeasureKeyCache(outline));
   const measures = $derived(outline.filter((block) => block.type === 'measure'));
   const statusMeasure = $derived(getMeasureAtPosition(outline, mode === 'timeline'
     ? timelineCursor.positionSixteenths : getOutlinePositionSixteenths(outline, cursor.blockId))?.measure);
@@ -142,6 +144,14 @@
       ));
     })));
   const focusedNote = $derived(locatedNotes.find(({ note }) => note.id === timelineCursor.focusedNoteId));
+  const slurPaths = $derived(getSlurRanges({ outline, slurs }).map(span => {
+    const x1 = (span.first.start + 0.25) * pixelsPerSixteenth;
+    const x2 = (span.last.start + 0.25) * pixelsPerSixteenth;
+    const highest = Math.max(...span.members.flatMap(entry => entry.note.pitches.map(pitch => pitch.midi)));
+    const y = pitchTopMargin + (108 - highest) * pitchRowHeight - 8;
+    return { id: span.id, active: !pedalMode && span.first.staff === timelineCursor.staff && span.first.voiceIndex === timelineCursor.voiceIndex,
+      path: `M ${x1} ${y} Q ${(x1 + x2) / 2} ${y - 28} ${x2} ${y}` };
+  }));
   const focusedGrace = $derived(getFocusedGrace(outline, timelineCursor));
   const focusedGraceX = $derived.by(() => {
     if (!focusedGrace) return 0;
@@ -163,11 +173,12 @@
       });
     });
   });
-  const focusedSectionPosition = $derived.by(() => {
+  const focusedBoundary = $derived.by(() => {
     let position = 0;
     for (const block of outline) {
       if (block.id === cursor.blockId) {
-        return block.type === 'section' ? position : null;
+        return block.type === 'section' || block.type === 'key-change'
+          ? { position, keyChange: block.type === 'key-change' } : null;
       }
       if (block.type === 'measure') {
         position += (block.data.length.cnt / block.data.length.unit) * pixelsPerWhole;
@@ -265,7 +276,6 @@
     animateTimelineVerticalScroll(rollTop, pitchTop);
   });
   const pitches = $derived.by(() => {
-    const diatonicPitchClasses = getDiatonicPitchClasses(outline[0].data.keySignature);
 
     return Array.from({ length: 88 }, (_, index) => {
       const midi = 108 - index;
@@ -276,7 +286,6 @@
         midi,
         label: `${name}${Math.floor(midi / 12) - 1}`,
         isSharp: name.includes('#'),
-        isDiatonic: diatonicPitchClasses.has(pitchClass),
       };
     });
   });
@@ -361,10 +370,11 @@
           <span class:fixed-input={inputTuplet !== undefined}>Input {getNoteValueLabel(inputValue)}{inputTuplet ? ' T' : ''}</span>
         </span>
       {/if}
-      {#if focusedSectionPosition !== null}
+      {#if focusedBoundary !== null}
         <div
           class="section-focus-line"
-          style={`left: ${focusedSectionPosition}px`}
+          class:key-change-focus-line={focusedBoundary.keyChange}
+          style={`left: ${focusedBoundary.position}px`}
           aria-hidden="true"
         ></div>
       {/if}
@@ -380,8 +390,8 @@
           {#each pitches as pitch (pitch.midi)}
             <div
               class="pitch-lane"
-              class:diatonic={pitch.isDiatonic}
-              class:chromatic={!pitch.isDiatonic}
+              class:diatonic={isDiatonicInMeasure(measureKeyCache, measure.id, pitch.midi)}
+              class:chromatic={!isDiatonicInMeasure(measureKeyCache, measure.id, pitch.midi)}
               aria-hidden="true"
             ></div>
           {/each}
@@ -407,6 +417,10 @@
               </div>
             {/if}
             {@const activeNoteHeight = entry.length % 4 === 0 ? 24 : entry.length % 2 === 0 ? 18 : 14}
+            {@const noteTempo = entry.staff === 'upperStaff' && entry.voiceIndex === 0 ? tempoChanges?.find(change => change.noteId === note.id) : undefined}
+            {#if noteTempo}
+              <span class="tempo-mark" style={`left: ${entry.position * pixelsPerSixteenth}px; top: ${pitchTopMargin + (108 - note.pitches[0].midi) * pitchRowHeight - 38}px`}>Tempo {noteTempo.bpm}</span>
+            {/if}
             {#if mode === 'timeline' && !pedalMode && entry.staff === timelineCursor.staff && entry.voiceIndex === timelineCursor.voiceIndex}
               <div
                 class="note-focus-column"
@@ -424,8 +438,8 @@
                 class:inactive={pedalMode || mode === 'outline' || entry.staff !== timelineCursor.staff || entry.voiceIndex !== timelineCursor.voiceIndex}
                 class:timeline-inactive={mode === 'timeline' && (pedalMode || entry.staff !== timelineCursor.staff || entry.voiceIndex !== timelineCursor.voiceIndex)}
                 class:lower-staff={entry.staff === 'lowerStaff'}
-                class:diatonic={isDiatonicMidi(pitch.midi)}
-                class:chromatic={!isDiatonicMidi(pitch.midi)}
+                class:diatonic={isDiatonicInMeasure(measureKeyCache, measure.id, pitch.midi)}
+                class:chromatic={!isDiatonicInMeasure(measureKeyCache, measure.id, pitch.midi)}
                 class:unselected={mode === 'timeline' && entry.staff === timelineCursor.staff && selectedNotes.length <= 1 && timelineCursor.focusedNoteId === note.id && timelineCursor.focusedPitchIndex !== pitchIndex}
                 aria-label={`${entry.staff === 'upperStaff' ? 'Upper' : 'Lower'} staff note ${note.id}`}
                 aria-current={mode === 'timeline' && !pedalMode && !focusedGrace && entry.staff === timelineCursor.staff && timelineCursor.focusedNoteId === note.id && timelineCursor.focusedPitchIndex === pitchIndex ? 'true' : undefined}
@@ -456,7 +470,7 @@
               {/if}
               {#each grace.pitches as pitch, pitchIndex (`${grace.id}-${pitch.midi}`)}
                 <div class="score-grace-note" role="img"
-                  class:diatonic={isDiatonicMidi(pitch.midi)} class:chromatic={!isDiatonicMidi(pitch.midi)}
+                  class:diatonic={isDiatonicInMeasure(measureKeyCache, measure.id, pitch.midi)} class:chromatic={!isDiatonicInMeasure(measureKeyCache, measure.id, pitch.midi)}
                   class:inactive={pedalMode || mode === 'outline' || entry.staff !== timelineCursor.staff || entry.voiceIndex !== timelineCursor.voiceIndex}
                   class:lower-staff={entry.staff === 'lowerStaff'}
                   class:timeline-inactive={mode === 'timeline' && (pedalMode || entry.staff !== timelineCursor.staff || entry.voiceIndex !== timelineCursor.voiceIndex)}
@@ -476,6 +490,11 @@
           {#each tiePaths as tie (tie.id)}
             <path d={tie.path}></path>
           {/each}
+        </svg>
+      {/if}
+      {#if mode === 'timeline' && slurPaths.length > 0}
+        <svg class="tie-links slur-links" width="100%" height="100%" aria-label="Slurs" role="img">
+          {#each slurPaths as slur (slur.id)}<path d={slur.path} class:inactive={!slur.active}></path>{/each}
         </svg>
       {/if}
     </div>
@@ -529,11 +548,15 @@
       </div>
     {/each}
   </aside>
-    <ScorePreview {outline} {trills} activeIndex={(statusMeasureNumber ?? 0) - 1} />
+    <ScorePreview {outline} {trills} {tempoChanges} {clefChanges} {slurs}
+      selectedNoteIds={pedalMode ? [] : selectedNotes.map(entry => entry.note.id)} activeIndex={(statusMeasureNumber ?? 0) - 1} />
   {/if}
 </section>
 
 <style>
+  .slur-links path { stroke: #426078; stroke-width: 2; fill: none; }
+  .slur-links path.inactive { opacity: 0.4; }
+  .tempo-mark { position: absolute; z-index: 8; white-space: nowrap; font-size: 12px; color: #304b55; background: #edf3f3d9; border-radius: 2px; padding: 2px 4px; pointer-events: none; }
   .trill-mark { position:absolute; z-index:7; height:18px; display:flex; align-items:center; color:#243b45; pointer-events:none; font:bold italic 16px Georgia,serif; }
   .trill-mark.inactive { opacity:0.7; }
   .trill-wave { flex:1; height:8px; background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8'%3E%3Cpath d='M0 4 Q2 0 4 4 T8 4' fill='none' stroke='%23243b45' stroke-width='1.5'/%3E%3C/svg%3E") repeat-x center; }
@@ -816,6 +839,7 @@
     background: #d90000;
     pointer-events: none;
   }
+  .section-focus-line.key-change-focus-line { background: #2563d9; }
 
   .timeline-cursor {
     position: absolute;

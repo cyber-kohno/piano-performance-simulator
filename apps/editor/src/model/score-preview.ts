@@ -1,4 +1,9 @@
 import { spellPreviewPitch } from './pitch-spelling.ts';
+import { getKeySignatureForBlock, getNoteKeySignature } from './key-signature.ts';
+import { getSlurRanges } from './slur.ts';
+import { getTempoChanges, getTempoAt } from './tempo.ts';
+import { getClefChanges, getClefAt, type Clef } from './clef.ts';
+import { getMeterBeatLength } from '../state/measure-beats.ts';
 import { getTrillChain, getTrillAuxiliary } from './trill.ts';
 import { compare, lcm, rational, toNumber } from './rational.ts';
 import { getFlattenedVoiceElements, type KeySignature, type PedalEvent, type PianoPitch, type ScoreProject } from './project.ts';
@@ -20,7 +25,7 @@ export function getScorePreviewViewBox(left: number, width: number, top: number,
 
 export { spellPreviewPitch } from './pitch-spelling.ts';
 
-export function createScorePreview(outline: ScoreProject['outline'], activeIndex: number, trills: ScoreProject['trills'] = []) {
+export function createScorePreview(outline: ScoreProject['outline'], activeIndex: number, trills: ScoreProject['trills'] = [], tempoChanges: ScoreProject['tempoChanges'] = [], clefChanges: ScoreProject['clefChanges'] = [], slurs: ScoreProject['slurs'] = []) {
   const measures = outline.filter((block) => block.type === 'measure');
   if (activeIndex < 0 || activeIndex >= measures.length) return null;
   const firstIndex = Math.max(0, activeIndex - 1);
@@ -28,13 +33,35 @@ export function createScorePreview(outline: ScoreProject['outline'], activeIndex
   const visibleIds = new Set(visible.flatMap((measure) => [measure.data.upperStaff, measure.data.lowerStaff]
     .flatMap((staff) => staff.voices.flatMap((voice) => getFlattenedVoiceElements(voice, measure.data.length).map(({ element }) => element.id)))));
   const initial = outline[0].data;
+  const noteTargets = visible.flatMap((measure, measureOffset) => [measure.data.upperStaff, measure.data.lowerStaff].flatMap((staff, staffIndex) =>
+    staff.voices.flatMap((voice, voiceIndex) => getFlattenedVoiceElements(voice, measure.data.length).flatMap(entry => entry.element.kind === 'note'
+      ? [{ noteId: entry.element.id, measureOffset, staffIndex, voiceNumber: staffIndex * 3 + voiceIndex + 1, position: entry.positionSixteenths }] : []))));
+  const slurMarks = new Map<string, string>();
+  // Non-overlapping ranges per staff/voice require at most six simultaneous numbers.
+  for (const span of getSlurRanges({ outline, slurs })) {
+    const clipped = span.members.filter(entry => visibleIds.has(entry.note.id));
+    if (!clipped.length) continue;
+    const number = (span.first.staff === 'upperStaff' ? 0 : 3) + span.first.voiceIndex + 1;
+    const first = clipped[0].note.id, last = clipped.at(-1)!.note.id;
+    slurMarks.set(first, (slurMarks.get(first) ?? '') + `<slur type="start" number="${number}" placement="above"/>`);
+    slurMarks.set(last, (slurMarks.get(last) ?? '') + `<slur type="stop" number="${number}"/>`);
+  }
+  const tempoProject = { outline, tempoChanges };
+  const clefProject = { outline, clefChanges };
+  const clefs = getClefChanges(clefProject);
+  const clefXml = (clef: Clef, number: number) => `<clef number="${number}"><sign>${clef === 'treble' ? 'G' : 'F'}</sign><line>${clef === 'treble' ? 2 : 4}</line></clef>`;
+  const tempos = getTempoChanges(tempoProject);
+  const beat = getMeterBeatLength(initial.timeSignature);
+  const beatLength = beat.cnt / beat.unit * 16;
+  const tempoDirection = (bpm: number, offset: number) => `<direction placement="above"><direction-type><metronome><beat-unit>${beat.unit === 8 ? beat.cnt === 3 ? 'quarter' : 'eighth' : 'quarter'}</beat-unit>${beat.cnt === 3 ? '<beat-unit-dot/>' : ''}<per-minute>${bpm}</per-minute></metronome></direction-type><offset sound="yes">${Math.round(offset * ticksPerSixteenth)}</offset><staff>1</staff><sound tempo="${bpm * beatLength / 4}"/></direction>`;
   const trillByNote = new Map<string, string>();
   for(const span of trills) {
     const chain=getTrillChain({outline},span.startNoteId);
     if(chain.at(-1)?.id!==span.endNoteId || !chain.every(note=>note.pitches.length===1)) continue;
     const clipped=chain.filter(note=>visibleIds.has(note.id));
-    const auxiliary=getTrillAuxiliary(chain[0].pitches[0].midi,initial.keySignature,span.settings.auxiliary);
-    const keyAux=getTrillAuxiliary(chain[0].pitches[0].midi,initial.keySignature,'diatonic');
+    const trillKey = getNoteKeySignature(outline, span.startNoteId);
+    const auxiliary=getTrillAuxiliary(chain[0].pitches[0].midi,trillKey,span.settings.auxiliary);
+    const keyAux=getTrillAuxiliary(chain[0].pitches[0].midi,trillKey,'diatonic');
     const accidental=auxiliary.alter!==keyAux.alter ? ['flat-flat','flat','natural','sharp','double-sharp'][auxiliary.alter+2] : undefined;
     clipped.forEach((note,index)=>{
       const start=index===0, stop=index===clipped.length-1;
@@ -60,16 +87,20 @@ export function createScorePreview(outline: ScoreProject['outline'], activeIndex
       pedalDown = event.action !== 'stop';
     }
   }
-  const pitchXml = (pitch: PianoPitch) => {
-    const spelling = spellPreviewPitch(pitch.midi, initial.keySignature);
+  const pitchXml = (pitch: PianoPitch, key: KeySignature) => {
+    const spelling = spellPreviewPitch(pitch.midi, key);
     return `<pitch><step>${spelling.step}</step><alter>${spelling.alter}</alter><octave>${spelling.octave}</octave></pitch>`;
   };
   const content = visible.map((measure, index) => {
     const length = measure.data.length.cnt / measure.data.length.unit * 16;
     const irregular = length !== initial.timeSignature.cnt / initial.timeSignature.unit * 16;
-    let body = index === 0 ? `<attributes><divisions>${ticksPerSixteenth * 4}</divisions><key><fifths>${initial.keySignature.fifths}</fifths></key>` +
+    const measureStart = measures.slice(0, firstIndex + index).reduce((sum, block) => sum + block.data.length.cnt / block.data.length.unit * 16, 0);
+    const measureKey = getKeySignatureForBlock(outline, measure.id);
+    const previousKey = firstIndex + index > 0 ? getKeySignatureForBlock(outline, measures[firstIndex + index - 1].id) : initial.keySignature;
+    let body = index === 0 ? `<attributes><divisions>${ticksPerSixteenth * 4}</divisions><key><fifths>${measureKey.fifths}</fifths></key>` +
       `<time><beats>${initial.timeSignature.cnt}</beats><beat-type>${initial.timeSignature.unit}</beat-type></time>` +
-      '<staves>2</staves><clef number="1"><sign>G</sign><line>2</line></clef><clef number="2"><sign>F</sign><line>4</line></clef></attributes>' : '';
+      '<staves>2</staves>' + clefXml(getClefAt(clefProject, 'upperStaff', measureStart), 1) + clefXml(getClefAt(clefProject, 'lowerStaff', measureStart), 2) + '</attributes>' : '';
+    if (index > 0 && measureKey.fifths !== previousKey.fifths) body += `<attributes><key><fifths>${measureKey.fifths}</fifths></key></attributes>`;
     const pedalEvents: { offset: PedalEvent['offset']; type: PreviewPedalEvent['type'] }[] = [...(measure.data.pedalEvents ?? [])]
       .sort((a, b) => compare(a.offset, b.offset)).map(event => ({ offset: event.offset, type: event.action }));
     if (index === 0 && pedalDown) {
@@ -89,6 +120,23 @@ export function createScorePreview(outline: ScoreProject['outline'], activeIndex
       body += `<direction placement="below"><direction-type><pedal type="discontinue" line="yes" sign="no" number="1"/></direction-type><offset>${length * ticksPerSixteenth}</offset><staff>2</staff></direction>`;
       pedals.push({ measureOffset: index, position: length, type: 'discontinue' });
     }
+    const localTempos = tempos.filter(change => change.measureId === measure.id);
+    if (index === 0 && !localTempos.some(change => change.localPosition === 0)) {
+      const firstStart = measures.slice(0, firstIndex).reduce((sum, block) => sum + block.data.length.cnt / block.data.length.unit * 16, 0);
+      body += tempoDirection(getTempoAt(tempoProject, firstStart), 0);
+    }
+    for (const change of localTempos) body += tempoDirection(change.bpm, change.localPosition);
+    // Attributes have no offset. Place staff-wide changes in score time, then
+    // rewind to the measure head before writing each voice's unchanged notes.
+    let clefPosition = 0;
+    for (const change of clefs.filter(change => change.measureId === measure.id)) {
+      if (index === 0 && change.localPosition === 0) continue;
+      const position = Math.round(change.localPosition * ticksPerSixteenth);
+      if (position > clefPosition) body += `<forward><duration>${position - clefPosition}</duration></forward>`;
+      body += `<attributes>${clefXml(change.clef, change.staff === 'upperStaff' ? 1 : 2)}</attributes>`;
+      clefPosition = position;
+    }
+    if (clefPosition > 0) body += `<backup><duration>${clefPosition}</duration></backup>`;
     let voiceCount = 0;
     [measure.data.upperStaff, measure.data.lowerStaff].forEach((staff, staffIndex) => staff.voices.forEach((voice, voiceIndex) => {
       if (voiceCount++ > 0) body += `<backup><duration>${length * ticksPerSixteenth}</duration></backup>`;
@@ -106,7 +154,7 @@ export function createScorePreview(outline: ScoreProject['outline'], activeIndex
         for (const grace of element.beforeGraceNotes ?? []) {
           grace.pitches.forEach((pitch, pitchIndex) => {
             const fingering = pitch.fingering ? `<notations><technical><fingering>${pitch.fingering}</fingering></technical></notations>` : '';
-            body += `<note><grace slash="${grace.slash ? 'yes' : 'no'}"/>${pitchIndex ? '<chord/>' : ''}${pitchXml(pitch)}` +
+            body += `<note><grace slash="${grace.slash ? 'yes' : 'no'}"/>${pitchIndex ? '<chord/>' : ''}${pitchXml(pitch, measureKey)}` +
               `<voice>${voiceNumber}</voice><type>${grace.value.type}</type>${'<dot/>'.repeat(grace.value.dots)}<staff>${staffIndex + 1}</staff>${fingering}</note>`;
           });
         }
@@ -114,12 +162,12 @@ export function createScorePreview(outline: ScoreProject['outline'], activeIndex
         const to = element.tieTo !== undefined && visibleIds.has(element.tieTo);
         element.pitches.forEach((pitch, pitchIndex) => {
           const ties = `${from ? '<tie type="stop"/>' : ''}${to ? '<tie type="start"/>' : ''}`;
-          const notations = (pitchIndex === 0 ? bracket : '') +
+          const notations = (pitchIndex === 0 ? bracket + (slurMarks.get(element.id) ?? '') : '') +
             (pitchIndex === 0 && trillByNote.has(element.id) ? '<ornaments>'+trillByNote.get(element.id)!.replaceAll('number="1"','number="'+voiceNumber+'"')+'</ornaments>' : '') + `${from ? '<tied type="stop"/>' : ''}${to ? '<tied type="start"/>' : ''}` +
             (pitchIndex === 0 && element.staccato ? `<articulations><${element.staccato.type === 'normal' ? 'staccato' : 'staccatissimo'}/></articulations>` : '') +
             (element.arpeggio ? `<arpeggiate number="${voiceNumber}"${element.arpeggio.type === 'down' ? ' direction="down"' : ''}/>` : '') +
             (pitch.fingering ? `<technical><fingering>${pitch.fingering}</fingering></technical>` : '');
-          body += `<note>${pitchIndex ? '<chord/>' : ''}${pitchXml(pitch)}<duration>${duration}</duration>${ties}<voice>${voiceNumber}</voice>${written}${modification}` +
+          body += `<note>${pitchIndex ? '<chord/>' : ''}${pitchXml(pitch, measureKey)}<duration>${duration}</duration>${ties}<voice>${voiceNumber}</voice>${written}${modification}` +
             (staff.voices.length > 1 ? `<stem>${voiceIndex % 2 === 0 ? 'up' : 'down'}</stem>` : '') +
             `<staff>${staffIndex + 1}</staff>${notations ? `<notations>${notations}</notations>` : ''}</note>`;
         });
@@ -128,6 +176,7 @@ export function createScorePreview(outline: ScoreProject['outline'], activeIndex
     return `<measure number="${firstIndex + index + 1}"${irregular ? ' implicit="yes"' : ''}>${body}</measure>`;
   }).join('');
   return {
+    noteTargets,
     activeOffset: activeIndex - firstIndex,
     pedals,
     xml: '<?xml version="1.0" encoding="UTF-8"?>' +

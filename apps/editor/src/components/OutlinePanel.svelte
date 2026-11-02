@@ -4,6 +4,7 @@
   import type { OutlineCursor } from '../state/outline-cursor';
   import { getMeasureBeatDisplay } from '../state/measure-beats';
   import InitialValues from './InitialValues.svelte';
+  import { getKeySignatureForBlock } from '../model/key-signature';
 
   let { outline, cursor, keyEditing = false, tempoEditing = false, meterEditing = false }: {
     outline: ScoreProject['outline'];
@@ -61,7 +62,7 @@
   <section class="current-info" aria-labelledby="current-info-title">
     <h2 id="current-info-title" class="region-label">Current Context</h2>
     <div class="current-values">
-      <InitialValues values={initialValues} />
+      <InitialValues values={{ ...initialValues, keySignature: getKeySignatureForBlock(outline, cursor.blockId) }} />
     </div>
   </section>
   <section class="outline" aria-label="Outline">
@@ -87,6 +88,13 @@
             aria-current={cursor.blockId === block.id ? 'true' : undefined}
           >
             <h3>{block.data.name}</h3>
+          </section>
+        {:else if block.type === 'key-change'}
+          <section class="key-change-block" data-block-id={block.id} class:focused={cursor.blockId === block.id}
+            aria-label="Key signature change" aria-current={cursor.blockId === block.id ? 'true' : undefined}>
+            <h3>Key Change</h3>
+            <InitialValues values={{ ...initialValues, keySignature: block.data.keySignature }} keyOnly
+              keyEditing={keyEditing && cursor.blockId === block.id} />
           </section>
         {:else if block.type === 'measure'}
           {@const beats = getMeasureBeatDisplay(initialValues.timeSignature, block.data.length)}
@@ -114,6 +122,7 @@
 </aside>
 
 <style>
+  .key-change-block { position: relative; margin-top: 6px; padding: 8px 10px; border-left: 3px solid #8876a4; background: #e6e0ee; color: #40565c; }
   .outline-panel {
     display: grid;
     grid-template-rows: var(--outline-info-height) minmax(0, 1fr);

@@ -1,14 +1,15 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { menuItemsAt } from '../state/note-menu';
-  let { path, noteId, choose, close }: {
+  import { menuItemsAt, type MenuItem } from '../state/note-menu';
+  let { path, noteId, choose, close, items }: {
+    items: MenuItem[];
     path: number[]; noteId: string;
     choose: (path: number[]) => void; close: () => void;
   } = $props();
   let left = $state(0), top = $state(0), height = $state(200);
   const width = 220, row = 28, padding = 6;
   const levels = $derived.by(() => {
-    const result = path.map((focus, depth) => ({ items: menuItemsAt(path.slice(0, depth + 1)), focus, active: true }));
+    const result = path.map((focus, depth) => ({ items: menuItemsAt(path.slice(0, depth + 1), items), focus, active: true }));
     const child = result.at(-1)?.items[path.at(-1)!]?.children;
     if (child?.length) result.push({ items: child, focus: -1, active: false });
     return result;
@@ -42,14 +43,18 @@
       style:max-height={`${height}px`}>
       {#each level.items as item, index}
         <button type="button" role="menuitem" tabindex="-1" class:focus={level.focus === index}
+          aria-disabled={item.disabled} title={item.disabled ? item.reason : undefined}
           class:muted={!level.active || (depth < path.length - 1 && index !== level.focus)}
-          onclick={() => { if (level.active) choose([...path.slice(0, depth), index]); }}>
+          onclick={() => { if (level.active && !item.disabled) choose([...path.slice(0, depth), index]); }}>
           <span>{item.label}</span>
           {#if item.children}<span>›</span>{/if}
         </button>
       {/each}
     </div>
   {/each}
+  {#if menuItemsAt(path, items)[path.at(-1)!]?.disabled}
+    <p class="reason" style:left={`${left}px`} style:top={`${top + levels[0].items.length * row + padding * 2 + 4}px`}>{menuItemsAt(path, items)[path.at(-1)!]?.reason}</p>
+  {/if}
 </div>
 
 <style>
@@ -57,4 +62,6 @@
   button { display: flex; justify-content: space-between; align-items: center; min-height: 28px; flex-shrink: 0; padding: 4px 8px; border: 1px solid transparent; border-radius: 4px; background: transparent; color: #c8f3ff; font: inherit; font-size: 13px; text-align: left; }
   button.focus { background: #245577; border-color: #72b9de; }
   button.muted { opacity: 0.55; }
+  button[aria-disabled='true'] { opacity: 0.45; }
+  .reason { position: fixed; z-index: 100; width: 220px; padding: 6px; margin: 0; box-sizing: border-box; color: #c8f3ff; background: #0d263a; font-size: 11px; }
 </style>

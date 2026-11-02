@@ -2,7 +2,11 @@
   import { onMount } from 'svelte';
   import { expressionDefinitions, getExpressionRows, type ExpressionEditor } from '../state/expression-editor';
   import type { PianoNote } from '../model/project';
-  let { target, editor, note, close }: {
+  import type { ChangesEditor } from '../state/changes-editor';
+  let { target, editor, note, close, tab, changesEditor, selectTab }: {
+    tab: 'expression' | 'changes';
+    changesEditor: ChangesEditor;
+    selectTab: (tab: 'expression' | 'changes') => void;
     target: { noteId: string; measureNumber: number; staff: 'upperStaff' | 'lowerStaff'; voice: number; trillNoteCount?: number };
     close: () => void;
     editor: ExpressionEditor;
@@ -17,10 +21,40 @@
 <dialog class="expression-modal" aria-labelledby="expression-modal-title" aria-describedby="expression-modal-context"
   bind:this={dialog} tabindex="-1" oncancel={(event) => { event.preventDefault(); close(); }}>
   <header>
-    <h2 id="expression-modal-title">Expression{editor.detail ? ` > ${selectedDefinition?.label ?? ''}` : ''}</h2>
+    <h2 id="expression-modal-title">Note settings{tab === 'expression' && editor.detail ? ` > ${selectedDefinition?.label ?? ''}` : tab === 'changes' && changesEditor.detail ? (changesEditor.detail === 'tempo' ? ' > Tempo' : ' > Clef') : ''}</h2>
     <p id="expression-modal-context">Measure {target.measureNumber} · {target.staff === 'upperStaff' ? 'Upper' : 'Lower'} · Voice {target.voice}</p>
   </header>
   <div class="expression-content">
+    <div class="tabs" role="tablist" aria-label="Note settings">
+      <button type="button" role="tab" aria-selected={tab === 'expression'} onclick={() => selectTab('expression')}>Expression</button>
+      <button type="button" role="tab" aria-selected={tab === 'changes'} onclick={() => selectTab('changes')}>Changes</button>
+    </div>
+    {#if tab === 'changes'}
+      <div role="listbox" aria-label={changesEditor.detail ? `${changesEditor.detail} settings` : 'Changes'}>
+        {#if changesEditor.detail}
+          <div role="option" aria-selected="true" class="expression-row active">
+            <span>{changesEditor.detail === 'tempo' ? 'BPM' : 'Clef'}</span>
+            <span class="expression-value">{changesEditor.detail === 'tempo' ? changesEditor.tempo.bpm : changesEditor.clef === 'treble' ? 'Treble' : 'Bass'}</span>
+          </div>
+        {:else}
+          {#each ['Tempo', 'Clef'] as label, index}
+            {@const disabled = target.voice !== 1 || (index === 0 && target.staff !== 'upperStaff')}
+            <div role="option" aria-selected={changesEditor.row === index} aria-disabled={disabled}
+              class="expression-row" class:active={changesEditor.row === index} class:disabled>
+              <span>{label}</span><span class="expression-value">{(index === 0 ? changesEditor.tempo.bpm !== null : changesEditor.clef !== null) ? 'On ›' : 'Off ›'}</span>
+            </div>
+          {/each}
+        {/if}
+      </div>
+      {#if (changesEditor.detail ?? (changesEditor.row === 0 ? 'tempo' : 'clef')) === 'tempo'}
+        <p>Applies to all staves and voices from this note until the next change.</p>
+        {#if target.staff !== 'upperStaff' || target.voice !== 1}<p class="unavailable">Requires Upper · Voice 1.</p>{/if}
+      {:else}
+        <p>Applies to every voice on this staff from this note. Pitches are unchanged.</p>
+        {#if target.voice !== 1}<p class="unavailable">Requires Voice 1 on this staff.</p>{/if}
+      {/if}
+      <p>{changesEditor.detail ? '←→ Edit · Backspace Back' : '↑↓ Select · Enter Settings · Delete Remove'}</p>
+    {:else}
     <div role="listbox" aria-label={editor.detail ? `${selectedDefinition?.label} settings` : 'Expressions'}>
       {#each rows as row, index (row.id)}
         <div role="option" aria-selected={editor.row === index} aria-disabled={row.disabled}
@@ -35,12 +69,16 @@
     {#if selectedDefinition && !selectedDefinition.available(note,editor.draft)}
       <p class="unavailable">{selectedDefinition.unavailableReason(note,editor.draft)}</p>
     {/if}
+    {/if}
     {#if editor.error}<p class="error" role="alert">{editor.error}</p>{/if}
   </div>
-  <footer><kbd>Shift+Enter</kbd> Apply <span>·</span> <kbd>Esc</kbd> Cancel{#if editor.detail} <span>·</span> <kbd>Backspace</kbd> Back{/if}</footer>
+  <footer><kbd>Tab</kbd> Switch <span>·</span><kbd>Shift+Enter</kbd> Apply <span>·</span> <kbd>Esc</kbd> Cancel{#if tab === 'expression' ? editor.detail : changesEditor.detail} <span>·</span> <kbd>Backspace</kbd> Back{/if}</footer>
 </dialog>
 
 <style>
+  .tabs { display: flex; gap: 8px; margin-bottom: 8px; }
+  .tabs button { border: 1px solid #a4bcbc; padding: 5px 14px; background: #edf3f3; color: inherit; border-radius: 3px; }
+  .tabs button[aria-selected='true'] { background: #c9dddd; font-weight: 600; }
   .expression-modal {
     position: fixed;
     inset: auto;
