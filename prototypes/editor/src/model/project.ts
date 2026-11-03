@@ -1,0 +1,22 @@
+/** Compatibility entry point. New production code uses domain APIs directly. */
+export type * from '../domain/score/types.ts';
+import WrittenValue from '../domain/theory/written-value.ts';
+export const getNoteValueSixteenths = WrittenValue.sixteenths;
+export const getNoteValueLabel = WrittenValue.label;
+import NotationGrid from '../domain/score/notation-grid.ts';
+export const isOnEditingGrid = NotationGrid.contains;
+import ScoreVoice from '../domain/score/score-voice.ts';
+export const getElementSixteenths = ScoreVoice.duration;
+export const getElementTime = ScoreVoice.time;
+export const getLocatedVoiceElements = ScoreVoice.locate;
+export const getFlattenedVoiceElements = ScoreVoice.flatten;
+export const mapVoiceNotes = ScoreVoice.mapNotes;
+import RestSpelling from '../domain/score/rest-spelling.ts';
+export const createRestId = RestSpelling.createId;
+export const createRestElements = RestSpelling.create;
+import ScoreMeasure from '../domain/score/score-measure.ts';
+export const createMeasureData = ScoreMeasure.create;
+import ScoreTies from '../domain/score/score-ties.ts';
+export const reconcileOutlineTies = ScoreTies.reconcile;
+import ScoreProjectFactory from '../domain/score/score-project.ts';
+export const createProject = ScoreProjectFactory.create;

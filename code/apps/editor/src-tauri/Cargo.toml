@@ -1,0 +1,19 @@
+[package]
+name = "clavierdesk-editor"
+version = "0.0.1"
+description = "ClavierDesk piano editor"
+edition = "2021"
+
+[[bin]]
+name = "clavierdesk"
+path = "src/main.rs"
+
+[lib]
+name = "clavierdesk_editor_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }

@@ -1,0 +1,13 @@
+{
+  "name": "clavierdesk-workspace",
+  "private": true,
+  "packageManager": "pnpm@11.25.0",
+  "scripts": {
+    "dev": "pnpm --filter @clavierdesk/editor dev",
+    "desktop": "pnpm --filter @clavierdesk/editor desktop",
+    "check": "pnpm --filter @clavierdesk/editor check",
+    "test": "pnpm --filter @clavierdesk/editor test",
+    "build": "pnpm --filter @clavierdesk/editor build",
+    "build:desktop": "pnpm --filter @clavierdesk/editor build:desktop"
+  }
+}

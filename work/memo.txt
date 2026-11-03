@@ -1,0 +1,5 @@
+npm install -g pnpm@11.25.0
+
+pnpm install --frozen-lockfile
+
+pnpm desktop

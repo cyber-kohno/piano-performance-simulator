@@ -1,0 +1,10 @@
+{
+  "identifier": "default",
+  "description": "Core desktop capability for the editor window.",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:default"
+  ]
+}
