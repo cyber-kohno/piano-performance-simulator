@@ -1,16 +1,21 @@
 <script lang="ts">
   import { onMount } from 'svelte';
 
-  let { anchor, value, maxLength = 32, label = 'Text', onCommit, onCancel }: {
+  let { anchor, value, maxLength = 32, label = 'Text', accept, onCommit, onCancel }: {
     anchor: HTMLElement;
     value: string;
     maxLength?: number;
     label?: string;
+    accept?: (value: string) => boolean;
     onCommit: (value: string) => void;
     onCancel: () => void;
   } = $props();
 
   let input: HTMLInputElement;
+  let draft = $state('');
+  $effect(() => { draft = value; });
+  const candidate = $derived(draft.trim());
+  const isAccepted = $derived(accept ? accept(candidate) : candidate.length > 0);
   let position = $state({ left: 0, top: 0, width: 240 });
 
   function updatePosition() {
@@ -28,8 +33,7 @@
     if (event.isComposing || event.keyCode === 229) return;
     if (event.key === 'Enter') {
       event.preventDefault();
-      const next = input.value.trim();
-      if (next) onCommit(next);
+      if (isAccepted) onCommit(candidate);
     } else if (event.key === 'Escape') {
       event.preventDefault();
       onCancel();
@@ -57,10 +61,11 @@
 <input
   bind:this={input}
   class="floating-text-input"
+  class:invalid={accept !== undefined && !isAccepted}
   type="text"
   aria-label={label}
   maxlength={maxLength}
-  {value}
+  bind:value={draft}
   style={`left:${position.left}px;top:${position.top}px;width:${position.width}px`}
   onkeydown={handleKeydown}
 />
@@ -80,5 +85,10 @@
     box-shadow: 0 5px 18px #243b4533;
     font: inherit;
     font-size: 14px;
+  }
+  .floating-text-input.invalid {
+    border-color: #b42332;
+    outline-color: #b4233240;
+    color: #b42332;
   }
 </style>

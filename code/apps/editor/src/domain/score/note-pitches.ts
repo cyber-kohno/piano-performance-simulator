@@ -1,4 +1,4 @@
-import type { ScoreProject,PianoStaffName,KeySignature } from './types.ts';
+import type { ScoreProject,PianoStaffName,KeySignature,PianoFingering } from './types.ts';
 import ScoreTimeline from './score-timeline.ts';
 import ScoreNotes from './score-notes.ts';
 import ScoreTies from './score-ties.ts';
@@ -48,10 +48,30 @@ namespace NotePitches {
     };
   }
 
-  export function transpose(project: ScoreProject,staff: PianoStaffName,noteIds: readonly string[],direction: -1|1): ScoreProject|undefined {
+  export function setFingering(project: ScoreProject,target: PitchTarget,fingering: PianoFingering,
+    substitutionFingering?: PianoFingering): ScoreProject {
+    const located=ScoreTimeline.note(project.outline,target.noteId,target.staff);
+    const current=located?.note.pitches[target.pitchIndex];
+    if(!located||!current||current.fingering===fingering&&current.substitutionFingering===substitutionFingering) return project;
+    return ScoreNotes.map(project,new Set([target.noteId]),note => ({
+      ...note,
+      pitches: note.pitches.map((pitch,index) => {
+        if(index!==target.pitchIndex) return pitch;
+        const { substitutionFingering: _previousSubstitution, ...base }=pitch;
+        return {
+          ...base,
+          fingering,
+          ...(substitutionFingering === undefined ? {} : { substitutionFingering }),
+        };
+      }),
+    }),target.staff);
+  }
+
+  export function transpose(project: ScoreProject,staff: PianoStaffName,noteIds: readonly string[],direction: -1|1,octave=false): ScoreProject|undefined {
     const ids=new Set(noteIds),selected=ScoreTimeline.allNotes(project.outline,staff).filter(entry => ids.has(entry.note.id));
-    if(selected.length<2||selected.length!==ids.size||selected.some(({ note }) => note.pitches.some(({ midi }) => midi+direction<PianoPitchRules.min||midi+direction>PianoPitchRules.max))) return undefined;
-    const next=ScoreNotes.map(project,ids,note => ({ ...note,pitches: note.pitches.map(pitch => ({ ...pitch,midi: pitch.midi+direction })) }),staff);
+    const interval=direction*(octave?12:1);
+    if(selected.length<2||selected.length!==ids.size||selected.some(({ note }) => note.pitches.some(({ midi }) => midi+interval<PianoPitchRules.min||midi+interval>PianoPitchRules.max))) return undefined;
+    const next=ScoreNotes.map(project,ids,note => ({ ...note,pitches: note.pitches.map(pitch => ({ ...pitch,midi: pitch.midi+interval })) }),staff);
     if(ScoreNotes.collides(project.outline,next.outline,staff,ids)) return undefined;
     return { ...next,outline: ScoreTies.reconcile(next.outline) };
   }

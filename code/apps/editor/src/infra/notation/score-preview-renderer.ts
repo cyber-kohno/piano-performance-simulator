@@ -1,4 +1,6 @@
 import PreviewSelection from './preview-selection.ts';
+import PreviewFingerings from './preview-fingerings.ts';
+import PreviewSections from './preview-sections.ts';
 import PreviewPedals from './preview-pedals.ts';
 import PreviewViewport from './preview-viewport.ts';
 import type PreviewMusicXml from '../musicxml/preview-musicxml.ts';
@@ -24,6 +26,8 @@ namespace ScorePreviewRenderer {
       });
       renderer.setLogLevel('warn');
       renderer.EngravingRules.RenderPedals = false;
+      // OSMD's default left shift causes the tempo mark to collide with the section label.
+      renderer.EngravingRules.MetronomeMarkXShift = 0;
       await renderer.load(preview.xml);
       if (signal.aborted) return;
       renderer.render();
@@ -32,6 +36,8 @@ namespace ScorePreviewRenderer {
       if (!svg || !measure) throw new Error('Missing rendered measure');
       const painter = PreviewSelection.createPainter(PreviewSelection.mapNotes(renderer, preview.noteTargets));
       PreviewPedals.draw(svg, renderer, preview.pedals);
+      PreviewFingerings.draw(svg, renderer);
+      PreviewSections.draw(svg, renderer, preview.sectionMarks);
       // OSMD positions use staff-space units; its default SVG uses ten pixels per unit.
       const box = measure.PositionAndShape;
       const left = (box.AbsolutePosition.x + box.BorderLeft) * 10;

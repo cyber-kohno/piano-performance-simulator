@@ -1,8 +1,9 @@
 <script lang="ts">
-  import { onDestroy } from 'svelte';
+  import { onDestroy, onMount } from 'svelte';
   import ScoreTimeline from "./domain/score/score-timeline.ts";
   import ScoreProjectFactory from "./domain/score/score-project.ts";
   import ScoreKey from "./domain/score/score-key.ts";
+  import ScoreMeasure from './domain/score/score-measure.ts';
 
   import NoteEditor from './action/editor/note-editor';
   import OutlineEditor from './action/editor/outline-editor.ts';
@@ -18,12 +19,13 @@
   import NoteMenu from './components/NoteMenu.svelte';
   import ExpressionModal from './components/ExpressionModal.svelte';
   import FloatingTextInput from './components/FloatingTextInput.svelte';
+  import EditorDialog from './components/EditorDialog.svelte';
 
   import NoteSettings, { type NoteSettingsState } from './state/note-settings.ts';
 
   import { controlNoteMenu, createNoteMenuItems } from './state/note-menu';
 
-  import { type ScoreProject } from "./domain/score/types.ts";
+  import { type PianoFingering, type ScoreProject } from "./domain/score/types.ts";
   import { createKeyHold } from './state/key-hold.svelte';
   import {createTimelineCursor,getSelectedTimelineNotes} from './state/timeline-cursor.ts';
   import {createOutlineCursor} from './state/outline-cursor.ts';
@@ -32,7 +34,11 @@
   import type NotePreview from './service/playback/note-preview.ts';
   import ScorePlayback from './service/playback/score-playback.ts';
   import EditorHistory, { type EditorHistorySnapshot } from './service/history/editor-history.ts';
+  import EditorDialogController from './service/dialog/editor-dialog-controller.ts';
+  import ScoreProjectFileController, { type FileOperationResult } from './service/project/score-project-file-controller.ts';
   import type { ScorePassage as ScorePassageData } from './domain/score/score-passage.ts';
+  import { invoke, isTauri } from '@tauri-apps/api/core';
+  import { getCurrentWindow } from '@tauri-apps/api/window';
 
   let { notePreview = null, audioPreviewError = null }: {
     notePreview: NotePreview.Value | null;
@@ -45,6 +51,18 @@
 
   const initialProject = ScoreProjectFactory.create();
   let project = $state<ScoreProject>(initialProject);
+  let currentProjectFile = $state<ScoreProjectFileController.Handle | null>(null);
+  let savedProjectFingerprint = $state(ScoreProjectFileController.fingerprint(initialProject));
+  let fileOperationInProgress = $state(false);
+  const projectFingerprint = $derived(ScoreProjectFileController.fingerprint(project));
+  const projectIsDirty = $derived(projectFingerprint !== savedProjectFingerprint);
+  let allowWindowClose = false;
+  const windowTitle = $derived(`${currentProjectFile?.name ?? 'Untitled'}${projectIsDirty ? '*' : ''} - ClavierDesk`);
+  $effect(() => {
+    document.title = windowTitle;
+    if (isTauri()) void getCurrentWindow().setTitle(windowTitle).catch(error =>
+      console.error('Failed to update window title:', error));
+  });
   let outlineCursor = $state(createOutlineCursor(initialProject.outline));
   let timelineCursor = $state(createTimelineCursor());
   let savedPlaybackFocus: { outlineCursor: typeof outlineCursor; timelineCursor: typeof timelineCursor } | null = null;
@@ -54,6 +72,48 @@
   let noteSettings=$state<NoteSettingsState|null>(null);
   let passageClipboard = $state<ScorePassageData | null>(null);
   let sectionTextInput = $state<{ blockId: string; anchor: HTMLElement; value: string } | null>(null);
+  let fingeringTextInput = $state<{ noteId: string; pitchIndex: number; anchor: HTMLElement; value: string } | null>(null);
+  function parseFingeringInput(value: string): { fingering: PianoFingering; substitutionFingering?: PianoFingering } | undefined {
+    const match = /^([1-5])(?:-([1-5]))?$/.exec(value);
+    if (!match) return undefined;
+    const fingering = Number(match[1]) as PianoFingering;
+    const substitutionFingering = match[2] === undefined ? undefined : Number(match[2]) as PianoFingering;
+    if (substitutionFingering === fingering) return undefined;
+    return substitutionFingering === undefined ? { fingering } : { fingering, substitutionFingering };
+  }
+  function openFingeringTextInput() {
+    if (mode !== 'timeline' || pedalMode || ottavaMode || playback?.playing ||
+      timelineCursor.focusedNoteId === null || timelineCursor.focusedPitchIndex === null ||
+      selectedTimelineNotes.length !== 1 || getFocusedGrace(project.outline, timelineCursor)) return false;
+    const focused = ScoreTimeline.note(project.outline, timelineCursor.focusedNoteId, timelineCursor.staff);
+    const pitch = focused?.note.pitches[timelineCursor.focusedPitchIndex];
+    if (!focused || !pitch) return false;
+    const target = `${focused.note.id}:${timelineCursor.focusedPitchIndex}`;
+    const anchor = Array.from(document.querySelectorAll<HTMLElement>('[data-fingering-pitch]'))
+      .find(element => element.dataset.fingeringPitch === target);
+    if (!anchor) return false;
+    fingeringTextInput = {
+      noteId: focused.note.id,
+      pitchIndex: timelineCursor.focusedPitchIndex,
+      anchor,
+      value: pitch.fingering === undefined ? '' : `${pitch.fingering}${pitch.substitutionFingering === undefined ? '' : `-${pitch.substitutionFingering}`}`,
+    };
+    keyHold.reset();
+    return true;
+  }
+  function commitFingeringText(value: string) {
+    if (!fingeringTextInput) return;
+    const parsed = parseFingeringInput(value);
+    if (!parsed) return;
+    const previousProject = project;
+    project = NoteEditor.setPitchFingering(project, {
+      ...timelineCursor,
+      focusedNoteId: fingeringTextInput.noteId,
+      focusedPitchIndex: fingeringTextInput.pitchIndex,
+    }, parsed.fingering, parsed.substitutionFingering);
+    fingeringTextInput = null;
+    recordProjectChange(previousProject);
+  }
   function openSectionTextInput() {
     if (mode !== 'outline') return false;
     const block = project.outline.find(entry => entry.id === outlineCursor.blockId);
@@ -109,6 +169,50 @@
     };
   }
   const editorHistory = EditorHistory.create(captureHistorySnapshot());
+  onMount(() => {
+    if (!isTauri()) return;
+    let unlisten: (() => void) | undefined;
+    let disposed = false;
+    void getCurrentWindow().onCloseRequested(event => {
+      if (allowWindowClose) return;
+      const hasPendingChanges = projectIsDirty || noteSettings !== null || sectionTextInput !== null || fingeringTextInput !== null;
+      if (!hasPendingChanges && !fileOperationInProgress) return;
+      event.preventDefault();
+      if (EditorDialogController.isOpen()) return;
+      if (fileOperationInProgress) {
+        EditorDialogController.alert({
+          title: 'File Operation in Progress',
+          messageLines: ['Wait for the current file operation to finish, then close the app.'],
+        });
+        return;
+      }
+      EditorDialogController.confirm({
+        tone: 'danger',
+        title: 'Discard Unsaved Changes?',
+        messageLines: ['The current project has unsaved or uncommitted changes.', 'Close the application and discard them?'],
+        confirmLabel: 'Discard and Close',
+        onConfirm: async () => {
+          allowWindowClose = true;
+          try {
+            await getCurrentWindow().close();
+          } catch (error) {
+            allowWindowClose = false;
+            EditorDialogController.alert({
+              title: 'Close Failed',
+              messageLines: [String(error)],
+            });
+          }
+        },
+      });
+    }).then(handler => {
+      if (disposed) handler();
+      else unlisten = handler;
+    }).catch(error => console.error('Failed to register the window close guard:', error));
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  });
   function recordProjectChange(previousProject: ScoreProject) {
     if (project !== previousProject) editorHistory.record(captureHistorySnapshot());
   }
@@ -121,6 +225,113 @@
     pedalCursor = { ...snapshot.pedalCursor, value: { ...snapshot.pedalCursor.value } };
     ottavaMode = snapshot.ottavaMode;
     ottavaCursor = { ...snapshot.ottavaCursor, value: { ...snapshot.ottavaCursor.value } };
+  }
+  function showProjectFileError(result: Extract<FileOperationResult<unknown>, { type: 'error' }>) {
+    const messages = {
+      read: 'The selected project file could not be read.',
+      write: 'The project file could not be saved.',
+      parse: 'The selected file is not valid JSON.',
+      'invalid-project': 'The selected file does not contain a valid ClavierDesk project.',
+    } satisfies Record<typeof result.reason, string>;
+    EditorDialogController.alert({ title: 'Project File Error', messageLines: [messages[result.reason]] });
+    if (result.error) console.error('Project file operation failed:', result.error);
+  }
+  function restartApplication() {
+    const restart = () => {
+      if (import.meta.env.DEV || !isTauri()) {
+        window.location.reload();
+        return;
+      }
+      void invoke('restart_app').catch(error => EditorDialogController.alert({
+        title: 'Restart Failed',
+        messageLines: [String(error)],
+      }));
+    };
+    if (projectIsDirty) {
+      EditorDialogController.confirm({
+        tone: 'danger',
+        title: 'Discard Unsaved Changes?',
+        messageLines: ['The current project has unsaved changes.', 'Restart the application and discard them?'],
+        confirmLabel: 'Restart Anyway',
+        onConfirm: restart,
+      });
+    } else {
+      restart();
+    }
+  }
+  async function saveProject(saveAs = false) {
+    if (fileOperationInProgress) return;
+    if (!saveAs && currentProjectFile && !projectIsDirty) return;
+    fileOperationInProgress = true;
+    const result = saveAs || !currentProjectFile
+      ? await ScoreProjectFileController.saveAs(project)
+      : await ScoreProjectFileController.save(project, currentProjectFile);
+    fileOperationInProgress = false;
+    if (result.type === 'error') {
+      showProjectFileError(result);
+      return;
+    }
+    if (result.type === 'cancelled') return;
+    currentProjectFile = result.value.handle;
+    savedProjectFingerprint = result.value.fingerprint;
+  }
+  function applyLoadedProject(handle: ScoreProjectFileController.Handle, loadedProject: ScoreProject) {
+    project = loadedProject;
+    currentProjectFile = handle;
+    savedProjectFingerprint = ScoreProjectFileController.fingerprint(loadedProject);
+    outlineCursor = createOutlineCursor(loadedProject.outline);
+    timelineCursor = createTimelineCursor();
+    mode = 'outline';
+    pedalMode = false;
+    ottavaMode = false;
+    menuPath = null;
+    noteSettings = null;
+    sectionTextInput = null;
+    fingeringTextInput = null;
+    passageClipboard = null;
+    savedPlaybackFocus = null;
+    playbackPosition = null;
+    keyHold.reset();
+    editorHistory.reset(captureHistorySnapshot());
+  }
+  async function loadProject() {
+    if (fileOperationInProgress || playback?.playing) return;
+    fileOperationInProgress = true;
+    const result = await ScoreProjectFileController.load();
+    fileOperationInProgress = false;
+    if (result.type === 'error') {
+      showProjectFileError(result);
+      return;
+    }
+    if (result.type === 'cancelled') return;
+    const { handle, project: loadedProject } = result.value;
+    if (projectIsDirty) {
+      EditorDialogController.confirm({
+        tone: 'danger',
+        title: 'Discard Unsaved Changes?',
+        messageLines: ['The current project has unsaved changes.', 'Load the selected project and discard them?'],
+        confirmLabel: 'Discard and Load',
+        onConfirm: () => applyLoadedProject(handle, loadedProject),
+      });
+      return;
+    }
+    applyLoadedProject(handle, loadedProject);
+  }
+  function removeFocusedOutlineElement() {
+    const previousProject = project;
+    const result = OutlineEditor.remove(project, outlineCursor);
+    if (result.project !== project) {
+      project = result.project;
+      outlineCursor = result.cursor;
+      timelineCursor = {
+        ...timelineCursor,
+        positionSixteenths: ScoreTimeline.outlinePosition(project.outline, outlineCursor.blockId),
+        focusedNoteId: null,
+        focusedPitchIndex: null,
+        selectionAnchorNoteId: null,
+      };
+    }
+    recordProjectChange(previousProject);
   }
   const isEditingInitialKey = $derived(mode === 'outline' &&
     project.outline.some(block => block.id === outlineCursor.blockId && (block.type === 'init' || block.type === 'key-change')) && keyHold.keySignatureEditing);
@@ -159,6 +370,12 @@
       return;
     }
     if (!previousNote || previousNote.note.id !== focused.note.id) return;
+    if (previousCursor.focusedPitchIndex !== timelineCursor.focusedPitchIndex &&
+      timelineCursor.focusedPitchIndex !== null) {
+      const selectedPitch = focused.note.pitches[timelineCursor.focusedPitchIndex];
+      if (selectedPitch) notePreview.pitchChange([selectedPitch.midi]);
+      return;
+    }
     const before = previousNote.note.pitches.map(pitch => pitch.midi);
     const after = focused.note.pitches.map(pitch => pitch.midi);
     const changed = after.flatMap((pitch, index) => pitch !== before[index] ? [index] : []);
@@ -170,7 +387,22 @@
     }
   }
 
+  function showPasteFailure(reason: import('./domain/score/score-passage.ts').PassagePasteFailureReason) {
+    const messages = {
+      'invalid-passage': 'The copied passage cannot be pasted at this position.',
+      'outside-score': 'There is no measure at the current cursor position.',
+      'crosses-measure': 'The passage would cross a measure boundary.',
+      'voice-unavailable': 'The active voice is not available in this measure.',
+      'invalid-position': 'The passage does not align with the available notation positions.',
+      occupied: 'The paste range overlaps existing notes.',
+      'tuplet-boundary': 'The paste range would split a tuplet group.',
+      'pitch-collision': 'The pasted pitches conflict with notes in another voice.',
+    } satisfies Record<import('./domain/score/score-passage.ts').PassagePasteFailureReason, string>;
+    EditorDialogController.alert({ title: 'Paste Unavailable', messageLines: [messages[reason]] });
+  }
+
   function handleKeydown(event: KeyboardEvent) {
+    if (EditorDialogController.controlKey(event)) return;
     if(noteSettings){
       event.preventDefault();
       const previousProject = project;
@@ -188,6 +420,13 @@
       return;
     }
     const targetElement = event.target;
+    if (event.key === 'F5') {
+      event.preventDefault();
+      if (event.repeat || fileOperationInProgress || (targetElement instanceof HTMLElement &&
+        (targetElement.isContentEditable || targetElement.closest('input, textarea, select')))) return;
+      restartApplication();
+      return;
+    }
     if (event.defaultPrevented || event.isComposing || (targetElement instanceof HTMLElement &&
       (targetElement.isContentEditable || targetElement.closest('input, textarea, select')))) return;
     const historyKey = event.key.toLowerCase();
@@ -204,6 +443,14 @@
       return;
     }
     if ((event.ctrlKey || event.metaKey) && !event.altKey &&
+      (historyKey === 's' || historyKey === 'l')) {
+      event.preventDefault();
+      if (event.repeat || fileOperationInProgress || playback?.playing) return;
+      if (historyKey === 'l') void loadProject();
+      else void saveProject(event.shiftKey);
+      return;
+    }
+    if ((event.ctrlKey || event.metaKey) && !event.altKey &&
       (historyKey === 'c' || historyKey === 'v')) {
       event.preventDefault();
       if (event.repeat || mode !== 'timeline' || pedalMode || ottavaMode || playback?.playing || getFocusedGrace(project.outline, timelineCursor)) return;
@@ -215,14 +462,16 @@
       const previousProject = project;
       const previousCursor = { ...timelineCursor };
       const result = NoteEditor.pastePassage(project, timelineCursor, passageClipboard);
-      if (result) {
+      if (result.ok) {
         project = result.project;
         ({ outlineCursor, timelineCursor } = EditorNavigation.sync(
           project.outline, outlineCursor, result.cursor, result.cursor.positionSixteenths,
         ));
         previewTimelineFocusChange(previousCursor, undefined);
+        recordProjectChange(previousProject);
+      } else {
+        showPasteFailure(result.reason);
       }
-      recordProjectChange(previousProject);
       return;
     }
     if (event.key === ' ') {
@@ -319,7 +568,25 @@
       event.defaultPrevented || event.isComposing ||
       event.altKey || event.ctrlKey || event.metaKey
     ) return;
-    if (mode === 'timeline' && event.key.toLowerCase() === 'w') {
+    if (mode === 'outline' && event.key === 'Delete' && !keyHold.pitchSelection) {
+      const block = project.outline.find(entry => entry.id === outlineCursor.blockId);
+      if (block?.type === 'measure' && ScoreMeasure.hasNotes(block.data)) {
+        event.preventDefault();
+        if (!event.repeat) EditorDialogController.confirm({
+          tone: 'danger',
+          title: 'Delete Measure',
+          messageLines: ['This measure contains notes.', 'Delete the measure and all notes in it?'],
+          confirmLabel: 'Delete',
+          onConfirm: removeFocusedOutlineElement,
+        });
+        return;
+      }
+    }
+    if (mode === 'timeline' && event.key.toLowerCase() === 'w' && !event.shiftKey) {
+      if (!event.repeat && openFingeringTextInput()) event.preventDefault();
+      if (fingeringTextInput) return;
+    }
+    if (mode === 'timeline' && event.key.toLowerCase() === 't') {
       event.preventDefault();
       if (!event.repeat) {
         const previousProject = project;
@@ -424,11 +691,17 @@
   <FloatingTextInput anchor={sectionTextInput.anchor} value={sectionTextInput.value} maxLength={32} label="Section name"
     onCommit={commitSectionText} onCancel={() => sectionTextInput = null} />
 {/if}
+{#if fingeringTextInput}
+  <FloatingTextInput anchor={fingeringTextInput.anchor} value={fingeringTextInput.value} maxLength={3} label="Piano fingering"
+    accept={(value) => parseFingeringInput(value) !== undefined}
+    onCommit={commitFingeringText} onCancel={() => fingeringTextInput = null} />
+{/if}
 {#if noteSettings}
   <ExpressionModal target={noteSettings.target} editor={noteSettings.expression}
     tab={noteSettings.tab} changesEditor={noteSettings.changes} selectTab={(tab)=>{if(noteSettings)noteSettings={...noteSettings,tab};}}
     note={ScoreTimeline.note(project.outline,noteSettings.target.noteId,noteSettings.target.staff)!.note} close={closeExpressionModal} />
 {/if}
+<EditorDialog />
 
 <style>
   .editor {

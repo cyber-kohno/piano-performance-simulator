@@ -16,7 +16,11 @@ export type ScorePassage = {
   durationSixteenths: number;
   atoms: PassageAtom[];
 };
-export type PassagePasteResult = { project: ScoreProject; noteIds: string[] };
+export type PassagePasteFailureReason = 'invalid-passage' | 'outside-score' | 'crosses-measure' |
+  'voice-unavailable' | 'invalid-position' | 'occupied' | 'tuplet-boundary' | 'pitch-collision';
+export type PassagePasteResult =
+  | { ok: true; project: ScoreProject; noteIds: string[] }
+  | { ok: false; reason: PassagePasteFailureReason };
 
 namespace ScorePassage {
   function noteIds(element: PianoNote | PianoTuplet): string[] {
@@ -110,19 +114,23 @@ namespace ScorePassage {
     return element.elements.every(child => child.kind === 'rest');
   }
 
+  type RestSpanResult = { ok: true; elements: PianoVoiceElement[] } |
+    { ok: false; reason: 'occupied' | 'tuplet-boundary' | 'invalid-position' };
+
   function prepareRestSpan(elements: PianoVoiceElement[], measureLength: MeasureLength,
-    start: number, end: number): PianoVoiceElement[] | undefined {
+    start: number, end: number): RestSpanResult {
     const voice = { id: 'clipboard-target', elements };
     const entries = ScoreVoice.locate(voice, measureLength).filter(entry =>
       MusicalTime.compareNumbers(entry.positionSixteenths, end) < 0 &&
       MusicalTime.compareNumbers(MusicalTime.addNumbers(entry.positionSixteenths, entry.lengthSixteenths), start) > 0,
     );
-    if (!entries.length || entries.some(({ element, positionSixteenths, lengthSixteenths }) => {
-      if (element.kind === 'rest' || element.kind === 'measure-rest') return false;
-      if (element.kind !== 'tuplet' || !everyRest(element)) return true;
+    if (!entries.length) return { ok: false, reason: 'invalid-position' };
+    for (const { element, positionSixteenths, lengthSixteenths } of entries) {
+      if (element.kind === 'rest' || element.kind === 'measure-rest') continue;
+      if (element.kind !== 'tuplet' || !everyRest(element)) return { ok: false, reason: 'occupied' };
       const tupletEnd = MusicalTime.addNumbers(positionSixteenths, lengthSixteenths);
-      return positionSixteenths < start || tupletEnd > end;
-    })) return undefined;
+      if (positionSixteenths < start || tupletEnd > end) return { ok: false, reason: 'tuplet-boundary' };
+    }
 
     // Empty tuplets and measure rests covered by the whole passage become ordinary rests.
     const byIndex = new Map<number, typeof entries[number]>(entries.map(entry => [entry.index, entry] as const));
@@ -137,29 +145,30 @@ namespace ScorePassage {
       MusicalTime.compareNumbers(entry.positionSixteenths, end) < 0 &&
       MusicalTime.compareNumbers(MusicalTime.addNumbers(entry.positionSixteenths, entry.lengthSixteenths), start) > 0,
     );
-    return !located.length || located.some(entry => entry.element.kind !== 'rest') ? undefined : expanded;
+    return !located.length || located.some(entry => entry.element.kind !== 'rest')
+      ? { ok: false, reason: 'invalid-position' } : { ok: true, elements: expanded };
   }
 
   function replaceRestSpan(elements: PianoVoiceElement[], measureLength: MeasureLength,
-    start: number, end: number, replacement: PianoNote | PianoTuplet): PianoVoiceElement[] | undefined {
+    start: number, end: number, replacement: PianoNote | PianoTuplet): RestSpanResult {
     const expanded = prepareRestSpan(elements, measureLength, start, end);
-    if (!expanded) return undefined;
-    const located = ScoreVoice.locate({ id: 'clipboard-target', elements: expanded }, measureLength).filter(entry =>
+    if (!expanded.ok) return expanded;
+    const located = ScoreVoice.locate({ id: 'clipboard-target', elements: expanded.elements }, measureLength).filter(entry =>
       MusicalTime.compareNumbers(entry.positionSixteenths, end) < 0 &&
       MusicalTime.compareNumbers(MusicalTime.addNumbers(entry.positionSixteenths, entry.lengthSixteenths), start) > 0,
     );
-    if (!located.length) return undefined;
+    if (!located.length) return { ok: false, reason: 'invalid-position' };
     const first = located[0], last = located.at(-1)!;
     const lastEnd = MusicalTime.addNumbers(last.positionSixteenths, last.lengthSixteenths);
     if (first.positionSixteenths > start || lastEnd < end ||
-      !NotationGrid.contains(start - first.positionSixteenths) || !NotationGrid.contains(lastEnd - end)) return undefined;
-    return [
-      ...expanded.slice(0, first.index),
+      !NotationGrid.contains(start - first.positionSixteenths) || !NotationGrid.contains(lastEnd - end)) return { ok: false, reason: 'invalid-position' };
+    return { ok: true, elements: [
+      ...expanded.elements.slice(0, first.index),
       ...RestSpelling.create(first.positionSixteenths, start - first.positionSixteenths),
       replacement,
       ...RestSpelling.create(end, lastEnd - end),
-      ...expanded.slice(last.index + 1),
-    ];
+      ...expanded.elements.slice(last.index + 1),
+    ] };
   }
 
   function cloneAtoms(passage: ScorePassage) {
@@ -201,30 +210,33 @@ namespace ScorePassage {
 
   /** Preflight the whole destination range, then replace rests in one measure atomically. */
   export function paste(project: ScoreProject, staff: PianoStaffName, voiceIndex: number, start: number,
-    passage: ScorePassage): PassagePasteResult | undefined {
+    passage: ScorePassage): PassagePasteResult {
     if (!passage.atoms.length || passage.durationSixteenths <= 0 ||
-      !NotationGrid.contains(start) || !NotationGrid.contains(passage.durationSixteenths)) return undefined;
+      !NotationGrid.contains(start) || !NotationGrid.contains(passage.durationSixteenths)) return { ok: false, reason: 'invalid-passage' };
     const location = ScoreTimeline.measureAt(project.outline, start);
-    if (!location || MusicalTime.compareNumbers(start + passage.durationSixteenths,
-      location.startSixteenths + location.lengthSixteenths) > 0) return undefined;
+    if (!location) return { ok: false, reason: 'outside-score' };
+    if (MusicalTime.compareNumbers(start + passage.durationSixteenths,
+      location.startSixteenths + location.lengthSixteenths) > 0) return { ok: false, reason: 'crosses-measure' };
     const voice = location.measure.data[staff].voices[voiceIndex];
-    if (!voice) return undefined;
+    if (!voice) return { ok: false, reason: 'voice-unavailable' };
     const localStart = MusicalTime.addNumbers(start, -location.startSixteenths);
     const localEnd = MusicalTime.addNumbers(localStart, passage.durationSixteenths);
-    if (!NotationGrid.contains(localStart) || !NotationGrid.contains(localEnd)) return undefined;
+    if (!NotationGrid.contains(localStart) || !NotationGrid.contains(localEnd)) return { ok: false, reason: 'invalid-position' };
     const copied = cloneAtoms(passage);
     const intervals = copied.atoms.map(atom => ({
       atom,
       start: MusicalTime.addNumbers(localStart, atom.offsetSixteenths),
       end: MusicalTime.addNumbers(MusicalTime.addNumbers(localStart, atom.offsetSixteenths), atom.durationSixteenths),
     }));
-    let elements = prepareRestSpan(voice.elements, location.measure.data.length, localStart, localEnd);
-    if (!elements) return undefined;
+    const prepared = prepareRestSpan(voice.elements, location.measure.data.length, localStart, localEnd);
+    if (!prepared.ok) return prepared;
+    let elements = prepared.elements;
     // Sequentially replace each copied atom. Any note or partial tuplet collision aborts without mutation.
     for (const interval of intervals) {
-      if (!NotationGrid.contains(interval.start) || !NotationGrid.contains(interval.end - interval.start)) return undefined;
-      elements = replaceRestSpan(elements, location.measure.data.length, interval.start, interval.end, interval.atom.element) ?? [];
-      if (!elements.length) return undefined;
+      if (!NotationGrid.contains(interval.start) || !NotationGrid.contains(interval.end - interval.start)) return { ok: false, reason: 'invalid-position' };
+      const replacement = replaceRestSpan(elements, location.measure.data.length, interval.start, interval.end, interval.atom.element);
+      if (!replacement.ok) return replacement;
+      elements = replacement.elements;
     }
     const outline = project.outline.map(block => block.id !== location.measure.id || block.type !== 'measure' ? block : {
       ...block,
@@ -244,8 +256,9 @@ namespace ScorePassage {
         lengthSixteenths: entry.lengthSixteenths,
         pitches: entry.note.pitches,
       }));
-    if (spans.length !== copied.clonedNotes.length || VoiceCollision.exists(project.outline, spans)) return undefined;
-    return { project: next, noteIds: copied.clonedNotes };
+    if (spans.length !== copied.clonedNotes.length) return { ok: false, reason: 'invalid-passage' };
+    if (VoiceCollision.exists(project.outline, spans)) return { ok: false, reason: 'pitch-collision' };
+    return { ok: true, project: next, noteIds: copied.clonedNotes };
   }
 }
 

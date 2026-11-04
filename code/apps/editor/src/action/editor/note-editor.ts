@@ -10,7 +10,7 @@ import ScoreTrill from "../../domain/score/score-trill.ts";
 import ScoreClef from "../../domain/score/score-clef.ts";
 import NoteExpressions from '../../domain/score/note-expressions.ts';
 import NotePitches from '../../domain/score/note-pitches.ts';
-import type { KeySignature, NoteValue, PianoNote, ScoreProject, TrillSettings } from "../../domain/score/types.ts";
+import type { KeySignature, NoteValue, PianoFingering, PianoNote, ScoreProject, TrillSettings } from "../../domain/score/types.ts";
 import { type Clef } from "../../domain/score/score-clef.ts";
 import * as Timeline from '../../state/timeline-cursor.ts';
 import * as Grace from '../../state/grace-input.ts';
@@ -18,7 +18,7 @@ import * as Grace from '../../state/grace-input.ts';
 import { validateExpressionDraft } from '../../state/expression-editor.ts';
 
 import EditTransaction, { type NormalizedRange } from './edit-transaction.ts';
-import ScorePassage, { type ScorePassage as ScorePassageData } from '../../domain/score/score-passage.ts';
+import ScorePassage, { type PassagePasteFailureReason, type ScorePassage as ScorePassageData } from '../../domain/score/score-passage.ts';
 
 export type NoteEditResult = { project: ScoreProject; cursor: Timeline.TimelineCursor };
 export type NoteSettings = Pick<PianoNote, 'staccato' | 'arpeggio'> & {
@@ -44,12 +44,13 @@ namespace NoteEditor {
   export function move(project: ScoreProject, cursor: Timeline.TimelineCursor, direction: -1 | 1) {
     return finish(project, Timeline.moveFocusedTimelineNote(project, cursor, direction));
   }
-  export function transpose(project: ScoreProject, cursor: Timeline.TimelineCursor, direction: -1 | 1) {
+  export function transpose(project: ScoreProject, cursor: Timeline.TimelineCursor, direction: -1 | 1, octave = false) {
     const selected = Timeline.getSelectedTimelineNotes(project.outline,cursor);
-    const next = NotePitches.transpose(project,cursor.staff,selected.map(entry=>entry.note.id),direction);
+    const interval = direction * (octave ? 12 : 1);
+    const next = NotePitches.transpose(project,cursor.staff,selected.map(entry=>entry.note.id),direction,octave);
     if (!next) return undefined;
     const focused = selected.find(entry=>entry.note.id===cursor.focusedNoteId)!;
-    return finish(project,{project:next,cursor:{...cursor,focusedPitchIndex:null,pitch:focused.note.pitches[0].midi+direction}});
+    return finish(project,{project:next,cursor:{...cursor,focusedPitchIndex:null,pitch:focused.note.pitches[0].midi+interval}});
   }
   export function movePitch(project: ScoreProject, cursor: Timeline.TimelineCursor, direction: -1 | 1, key?: KeySignature, octave = false) {
     if (!cursor.focusedNoteId || cursor.focusedPitchIndex === null) return undefined;
@@ -60,6 +61,14 @@ namespace NoteEditor {
     if (!cursor.focusedNoteId || cursor.focusedPitchIndex === null) return undefined;
     const result = NotePitches.add(project,{noteId:cursor.focusedNoteId,staff:cursor.staff,pitchIndex:cursor.focusedPitchIndex});
     return result && finish(project,{project:result.project,cursor:{...cursor,pitch:result.midi,focusedPitchIndex:result.pitchIndex}});
+  }
+  export function setPitchFingering(project: ScoreProject, cursor: Timeline.TimelineCursor,
+    fingering: PianoFingering, substitutionFingering?: PianoFingering): ScoreProject {
+    if (!cursor.focusedNoteId || cursor.focusedPitchIndex === null) return project;
+    const next = NotePitches.setFingering(project, {
+      noteId: cursor.focusedNoteId, staff: cursor.staff, pitchIndex: cursor.focusedPitchIndex,
+    }, fingering, substitutionFingering);
+    return next === project ? project : EditTransaction.commit(project, next);
   }
   export function setValue(project: ScoreProject, cursor: Timeline.TimelineCursor, value: NoteValue) {
     return finish(project, Timeline.setFocusedTimelineNoteValue(project, cursor, value));
@@ -88,12 +97,12 @@ namespace NoteEditor {
   }
   export function pastePassage(project: ScoreProject, cursor: Timeline.TimelineCursor, passage: ScorePassageData) {
     const result = ScorePassage.paste(project, cursor.staff, cursor.voiceIndex, cursor.positionSixteenths, passage);
-    if (!result) return undefined;
+    if (!result.ok) return result;
     const committed = EditTransaction.commit(project, result.project);
     const pasted = ScoreTimeline.notes(committed.outline, cursor.staff, cursor.voiceIndex)
       .filter(entry => result.noteIds.includes(entry.note.id));
     const first = pasted[0], last = pasted.at(-1);
-    if (!first || !last) return undefined;
+    if (!first || !last) return { ok: false as const, reason: 'invalid-passage' as PassagePasteFailureReason };
     const nextCursor: Timeline.TimelineCursor = {
       ...cursor,
       positionSixteenths: last.measureStartSixteenths + last.positionSixteenths,
@@ -103,7 +112,7 @@ namespace NoteEditor {
       focusedPitchIndex: null,
       selectionAnchorNoteId: first.note.id === last.note.id ? null : first.note.id,
     };
-    return { project: committed, cursor: nextCursor };
+    return { ok: true as const, project: committed, cursor: nextCursor };
   }
   export function toggleTie(project: ScoreProject, cursor: Timeline.TimelineCursor) {
     const result = Timeline.toggleTieToAdjacentTimelineNote(project, cursor);

@@ -20,6 +20,7 @@ import ScoreOttava from "../../domain/score/score-ottava.ts";
 import { type Clef } from "../../domain/score/score-clef.ts";
 
 import { type KeySignature, type PedalEvent, type PianoPitch, type PianoStaffName, type ScoreProject } from "../../domain/score/types.ts";
+import type { OutlineBlock } from "../../domain/score/types.ts";
 
 export type PreviewPedalEvent = {
   measureOffset: number;
@@ -31,9 +32,35 @@ export type PreviewOttavaEvent = { measureOffset: number; position: number; staf
 namespace PreviewMusicXml {
   export const spellPitch = PitchSpelling.forPreview;
 
+  function sectionMarkers(outline: OutlineBlock[]) {
+    const markers = new Map<string, { name: string; doubleBarline: boolean }>();
+    let sectionIndex = -1;
+    let pending: { name: string; index: number }[] = [];
+    for (const block of outline) {
+      if (block.type === 'section') {
+        sectionIndex += 1;
+        pending.push({ name: block.data.name, index: sectionIndex });
+      } else if (block.type === 'measure' && pending.length) {
+        // Empty adjacent sections share a score position. Keep the earliest one.
+        const section = pending[0];
+        markers.set(block.id, { name: section.name, doubleBarline: section.index > 0 });
+        pending = [];
+      }
+    }
+    return markers;
+  }
+
+  function fingeringXml(pitch: PianoPitch): string {
+    const initial = pitch.fingering === undefined ? '' : `<fingering>${pitch.fingering}</fingering>`;
+    const substitution = pitch.substitutionFingering === undefined ? ''
+      : `<fingering substitution="yes">${pitch.substitutionFingering}</fingering>`;
+    return initial || substitution ? `<technical>${initial}${substitution}</technical>` : '';
+  }
+
   export function create(outline: ScoreProject['outline'], activeIndex: number, trills: ScoreProject['trills'] = [], tempoChanges: ScoreProject['tempoChanges'] = [], clefChanges: ScoreProject['clefChanges'] = [], slurs: ScoreProject['slurs'] = []) {
     const measures = outline.filter((block) => block.type === 'measure');
     if (activeIndex < 0 || activeIndex >= measures.length) return null;
+    const sectionNameByMeasure = sectionMarkers(outline);
     const firstIndex = Math.max(0, activeIndex - 1);
     const visible = measures.slice(firstIndex, activeIndex + 2);
     const visibleIds = new Set(visible.flatMap((measure) => [measure.data.upperStaff, measure.data.lowerStaff]
@@ -136,6 +163,16 @@ namespace PreviewMusicXml {
         `<time><beats>${initial.timeSignature.cnt}</beats><beat-type>${initial.timeSignature.unit}</beat-type></time>` +
         '<staves>2</staves>' + clefXml(ScoreClef.at(clefProject, 'upperStaff', measureStart), 1) + clefXml(ScoreClef.at(clefProject, 'lowerStaff', measureStart), 2) + '</attributes>' : '';
       if (index > 0 && measureKey.fifths !== previousKey.fifths) body += `<attributes><key><fifths>${measureKey.fifths}</fifths></key></attributes>`;
+      const ottavaDirection = (event: PreviewOttavaEvent) => {
+        const number = event.staff === 'upperStaff' ? 1 : 2;
+        const placement = event.staff === 'upperStaff' ? 'above' : 'below';
+        return `<direction placement="${placement}"><direction-type><octave-shift type="${event.type}" size="8" number="${number}"/></direction-type><staff>${number}</staff></direction>`;
+      };
+      // Measure-head shifts can be read before any voice entry exists. Later shifts
+      // are emitted in their staff's first voice at the matching score-time boundary.
+      for (const event of ottavas.filter(event => event.measureOffset === index && event.position === 0)) {
+        body += ottavaDirection(event);
+      }
       const pedalEvents: { offset: PedalEvent['offset']; type: PreviewPedalEvent['type'] }[] = [...(measure.data.pedalEvents ?? [])]
         .sort((a, b) => MusicalTime.compare(a.offset, b.offset)).map(event => ({ offset: event.offset, type: event.action }));
       if (index === 0 && pedalDown) {
@@ -149,12 +186,6 @@ namespace PreviewMusicXml {
         body += `<direction placement="below"><direction-type><pedal type="${event.type}" line="yes" sign="no" number="1"/></direction-type><offset>${event.offset.numerator * (ticksPerSixteenth / event.offset.denominator)}</offset><staff>2</staff></direction>`;
         pedals.push({ measureOffset: index, position: MusicalTime.toNumber(event.offset), type: event.type });
         pedalDown = event.type !== 'stop';
-      }
-      for (const event of ottavas.filter(event => event.measureOffset === index)) {
-        const number = event.staff === 'upperStaff' ? 1 : 2;
-        const placement = event.staff === 'upperStaff' ? 'above' : 'below';
-        const offset = Math.round(event.position * ticksPerSixteenth);
-        body += `<direction placement="${placement}"><direction-type><octave-shift type="${event.type}" size="8" number="${number}"/></direction-type><offset>${offset}</offset><staff>${number}</staff></direction>`;
       }
       if (index === visible.length - 1 && pedalDown) {
         // A clipped/open line has no release hook. This is presentation only.
@@ -182,6 +213,18 @@ namespace PreviewMusicXml {
       [measure.data.upperStaff, measure.data.lowerStaff].forEach((staff, staffIndex) => staff.voices.forEach((voice, voiceIndex) => {
         if (voiceCount++ > 0) body += `<backup><duration>${length * ticksPerSixteenth}</duration></backup>`;
         const voiceNumber = staffIndex * 3 + voiceIndex + 1;
+        const voiceOttavas = voiceIndex === 0
+          ? ottavas.filter(event => event.measureOffset === index && event.staff === (staffIndex === 0 ? 'upperStaff' : 'lowerStaff'))
+            .filter(event => event.position > 0).sort((a, b) => a.position - b.position)
+          : [];
+        let ottavaIndex = 0;
+        const writeOttavasThrough = (position: number) => {
+          while (ottavaIndex < voiceOttavas.length && voiceOttavas[ottavaIndex].position <= position + 1e-9) {
+            const event = voiceOttavas[ottavaIndex++];
+            body += ottavaDirection(event);
+          }
+        };
+        if (voiceIndex === 0) writeOttavasThrough(0);
         for (const entry of ScoreVoice.flatten(voice, measure.data.length)) {
           const { element, tuplet, childIndex } = entry;
           const duration = entry.lengthTime.numerator * (ticksPerSixteenth / entry.lengthTime.denominator);
@@ -190,13 +233,14 @@ namespace PreviewMusicXml {
           const bracket = tuplet ? (childIndex === 0 ? '<tuplet type="start" bracket="yes"/>' : '') + (childIndex === tuplet.elements.length - 1 ? '<tuplet type="stop"/>' : '') : '';
           if (element.kind !== 'note') {
             body += `<note>${element.kind === 'measure-rest' ? '<rest measure="yes"/>' : '<rest/>'}<duration>${duration}</duration><voice>${voiceNumber}</voice>${written}${modification}<staff>${staffIndex + 1}</staff>${bracket ? `<notations>${bracket}</notations>` : ''}</note>`;
+            if (voiceIndex === 0) writeOttavasThrough(entry.positionSixteenths + entry.lengthSixteenths);
             continue;
           }
           for (const grace of element.beforeGraceNotes ?? []) {
             grace.pitches.forEach((pitch, pitchIndex) => {
-              const fingering = pitch.fingering ? `<notations><technical><fingering>${pitch.fingering}</fingering></technical></notations>` : '';
+              const fingering = fingeringXml(pitch);
               body += `<note><grace slash="${grace.slash ? 'yes' : 'no'}"/>${pitchIndex ? '<chord/>' : ''}${pitchXml(pitch, measureKey)}` +
-                `<voice>${voiceNumber}</voice><type>${grace.value.type}</type>${'<dot/>'.repeat(grace.value.dots)}<staff>${staffIndex + 1}</staff>${fingering}</note>`;
+                `<voice>${voiceNumber}</voice><type>${grace.value.type}</type>${'<dot/>'.repeat(grace.value.dots)}<staff>${staffIndex + 1}</staff>${fingering ? `<notations>${fingering}</notations>` : ''}</note>`;
             });
           }
           const from = element.tieFrom !== undefined && visibleIds.has(element.tieFrom);
@@ -207,17 +251,28 @@ namespace PreviewMusicXml {
               (pitchIndex === 0 && trillByNote.has(element.id) ? '<ornaments>' + trillByNote.get(element.id)!.replaceAll('number="1"', 'number="' + voiceNumber + '"') + '</ornaments>' : '') + `${from ? '<tied type="stop"/>' : ''}${to ? '<tied type="start"/>' : ''}` +
               (pitchIndex === 0 && element.staccato ? `<articulations><${element.staccato.type === 'normal' ? 'staccato' : 'staccatissimo'}/></articulations>` : '') +
               (element.arpeggio ? `<arpeggiate number="${voiceNumber}"${element.arpeggio.type === 'down' ? ' direction="down"' : ''}/>` : '') +
-              (pitch.fingering ? `<technical><fingering>${pitch.fingering}</fingering></technical>` : '');
+              fingeringXml(pitch);
             body += `<note>${pitchIndex ? '<chord/>' : ''}${pitchXml(pitch, measureKey)}<duration>${duration}</duration>${ties}<voice>${voiceNumber}</voice>${written}${modification}` +
               (staff.voices.length > 1 ? `<stem>${voiceIndex % 2 === 0 ? 'up' : 'down'}</stem>` : '') +
               `<staff>${staffIndex + 1}</staff>${notations ? `<notations>${notations}</notations>` : ''}</note>`;
           });
+          if (voiceIndex === 0) writeOttavasThrough(entry.positionSixteenths + entry.lengthSixteenths);
         }
+        if (voiceIndex === 0) writeOttavasThrough(length);
       }));
+      const nextMeasure = measures[firstIndex + index + 1];
+      if (nextMeasure && sectionNameByMeasure.get(nextMeasure.id)?.doubleBarline) {
+        // The right side of the previous measure is the reliable shared boundary in OSMD.
+        body += '<barline location="right"><bar-style>light-light</bar-style></barline>';
+      }
       return `<measure number="${firstIndex + index + 1}"${irregular ? ' implicit="yes"' : ''}>${body}</measure>`;
     }).join('');
     return {
       noteTargets,
+      sectionMarks: visible.flatMap((measure, measureOffset) => {
+        const section = sectionNameByMeasure.get(measure.id);
+        return section === undefined ? [] : [{ measureOffset, name: section.name }];
+      }),
       activeOffset: activeIndex - firstIndex,
       pedals,
       ottavas,

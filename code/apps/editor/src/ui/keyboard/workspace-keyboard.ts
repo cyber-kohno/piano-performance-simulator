@@ -125,7 +125,8 @@ namespace WorkspaceKeyboard {
       }
       if (selectedTimelineNotes.length > 1) {
         if (isMoveKey) {
-          const result = NoteEditor.transpose(project, timelineCursor, event.key === 'ArrowUp' ? 1 : -1);
+          const result = NoteEditor.transpose(project, timelineCursor, event.key === 'ArrowUp' ? 1 : -1,
+            keyHold.octaveMovement && !keyHold.pitchSelection);
           if (result) {
             project = result.project;
             timelineCursor = result.cursor;
@@ -159,17 +160,20 @@ namespace WorkspaceKeyboard {
         return;
       }
       if (keyHold.notePositionEditing && !keyHold.pitchSelection) {
-        const result = mode === 'timeline' && isAddMeasureKey
-          ? NoteEditor.duplicate(project, timelineCursor)
-          : mode === 'timeline' && isMoveSectionKey
-            ? NoteEditor.move(project, timelineCursor, event.key === 'ArrowLeft' ? -1 : 1)
-            : undefined;
-        if (result) {
-          project = result.project;
-          timelineCursor = result.cursor;
-          syncOutlineToTimelinePosition(timelineCursor.positionSixteenths);
+        // D also controls octave movement; vertical timeline arrows continue to that handler.
+        if (!(mode === 'timeline' && isMoveKey && keyHold.octaveMovement)) {
+          const result = mode === 'timeline' && isAddMeasureKey
+            ? NoteEditor.duplicate(project, timelineCursor)
+            : mode === 'timeline' && isMoveSectionKey
+              ? NoteEditor.move(project, timelineCursor, event.key === 'ArrowLeft' ? -1 : 1)
+              : undefined;
+          if (result) {
+            project = result.project;
+            timelineCursor = result.cursor;
+            syncOutlineToTimelinePosition(timelineCursor.positionSixteenths);
+          }
+          return;
         }
-        return;
       }
       // E pitch editing takes priority over scale-constrained movement.
       if (keyHold.octaveMovement && !keyHold.pitchSelection) {

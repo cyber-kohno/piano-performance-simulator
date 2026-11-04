@@ -16,6 +16,7 @@ export type EditorHistorySnapshot = {
 };
 
 export type EditorHistoryValue = {
+  reset(snapshot: EditorHistorySnapshot): void;
   record(snapshot: EditorHistorySnapshot): void;
   undo(): EditorHistorySnapshot | undefined;
   redo(): EditorHistorySnapshot | undefined;
@@ -30,6 +31,10 @@ namespace EditorHistory {
     const maxLength = Math.max(2, Math.floor(limit));
 
     return {
+      reset(snapshot) {
+        snapshots.splice(0, snapshots.length, snapshot);
+        currentIndex = 0;
+      },
       record(snapshot) {
         if (snapshots[currentIndex]?.project === snapshot.project) return;
         snapshots.splice(currentIndex + 1);

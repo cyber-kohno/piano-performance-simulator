@@ -5,7 +5,7 @@ const HOLD_BINDINGS = {
   rangeSelection: ['ShiftLeft', 'ShiftRight'],
   pitchSelection: ['KeyE'],
   diatonicMovement: ['KeyC'],
-  octaveMovement: ['KeyZ'],
+  octaveMovement: ['KeyD'],
   keySignatureEditing: ['KeyC'],
   noteNavigation: ['KeyE'],
   noteValueEditing: ['KeyF'],

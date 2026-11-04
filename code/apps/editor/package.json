@@ -15,6 +15,8 @@
   },
   "dependencies": {
     "@tauri-apps/api": "^2.12.4",
+    "@tauri-apps/plugin-dialog": "^2.7.0",
+    "@tauri-apps/plugin-fs": "^2.5.0",
     "opensheetmusicdisplay": "2.2.1",
     "spessasynth_lib": "^4.4.2",
     "svelte": "5.57.2"

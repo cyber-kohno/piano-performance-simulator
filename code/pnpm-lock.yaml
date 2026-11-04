@@ -13,6 +13,12 @@ importers:
       '@tauri-apps/api':
         specifier: ^2.12.4
         version: 2.12.4
+      '@tauri-apps/plugin-dialog':
+        specifier: ^2.7.0
+        version: 2.7.3
+      '@tauri-apps/plugin-fs':
+        specifier: ^2.5.0
+        version: 2.5.2
       opensheetmusicdisplay:
         specifier: 2.2.1
         version: 2.2.1
@@ -469,6 +475,12 @@ packages:
     resolution: {integrity: sha512-JI9bHfudSRJikGOrjbXEm6RjzzvmKuLc+JixB1NE8hNzQkNlCCIC3pTES3uypkR9lxHrsbxzcnSwhI2IxBQphw==}
     engines: {node: '>= 10'}
     hasBin: true
+
+  '@tauri-apps/plugin-dialog@2.7.3':
+    resolution: {integrity: sha512-CRgE+7TP4tvq9MjBU6f04NLTFIqVMLKHk3hAqlhil00ngK9ACTrXPH3oHpKMProxILodd3YjBoKbMwSI4IEcfA==}
+
+  '@tauri-apps/plugin-fs@2.5.2':
+    resolution: {integrity: sha512-XXvMSnFiob+G1H+YHCDf+bzWVumseQuEIhzpbOJzevUfL4k0U+sTApZWJHpoLiamggnVPJm5dJ5sDsniRyWxlg==}
 
   '@types/estree@1.0.10':
     resolution: {integrity: sha512-lTyOMnOcmRBzdCv6/4zUZCrEhV0xrqQiUZBZtVcbmLHBXKLnN8q89v/wKRF/Q0HbwVsqbIG3o5HDoFl9sduM+g==}
@@ -1187,6 +1199,14 @@ snapshots:
       '@tauri-apps/cli-win32-arm64-msvc': 2.12.4
       '@tauri-apps/cli-win32-ia32-msvc': 2.12.4
       '@tauri-apps/cli-win32-x64-msvc': 2.12.4
+
+  '@tauri-apps/plugin-dialog@2.7.3':
+    dependencies:
+      '@tauri-apps/api': 2.12.4
+
+  '@tauri-apps/plugin-fs@2.5.2':
+    dependencies:
+      '@tauri-apps/api': 2.12.4
 
   '@types/estree@1.0.10': {}
 

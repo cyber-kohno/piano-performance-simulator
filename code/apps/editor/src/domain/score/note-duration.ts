@@ -104,7 +104,8 @@ namespace NoteDuration {
     const samePitchNames=(a: PianoNote['pitches'],b: PianoNote['pitches']) =>
       a.length===b.length&&a.every((pitch,index) => pitch.midi===b[index].midi);
     const samePitches=(a: PianoNote['pitches'],b: PianoNote['pitches']) =>
-      samePitchNames(a,b)&&a.every((pitch,index) => pitch.fingering===b[index].fingering);
+      samePitchNames(a,b)&&a.every((pitch,index) => pitch.fingering===b[index].fingering&&
+        pitch.substitutionFingering===b[index].substitutionFingering);
     let expected=start;
     for(const entry of chain) {
       const length=entry.lengthSixteenths;

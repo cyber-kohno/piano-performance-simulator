@@ -408,6 +408,7 @@
             {#each note.pitches as pitch, pitchIndex (`${note.id}-${pitch.midi}`)}
               <div
                 class="score-note-pitch"
+                data-fingering-pitch={`${note.id}:${pitchIndex}`}
                 id={pitchIndex === note.pitches.length - 1 ? `note-menu-anchor-${note.id}` : undefined}
                 class:inactive={pedalMode || mode === 'outline' || entry.staff !== timelineCursor.staff || entry.voiceIndex !== timelineCursor.voiceIndex}
                 class:timeline-inactive={mode === 'timeline' && (pedalMode || entry.staff !== timelineCursor.staff || entry.voiceIndex !== timelineCursor.voiceIndex)}
