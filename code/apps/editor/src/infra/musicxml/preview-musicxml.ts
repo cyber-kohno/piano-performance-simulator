@@ -15,16 +15,18 @@ import ScoreVoice from "../../domain/score/score-voice.ts";
 import MusicalTime from "../../domain/theory/musical-time.ts";
 import Meter from "../../domain/theory/meter.ts";
 import ScoreKey from "../../domain/score/score-key.ts";
+import ScoreOttava from "../../domain/score/score-ottava.ts";
 
 import { type Clef } from "../../domain/score/score-clef.ts";
 
-import { type KeySignature, type PedalEvent, type PianoPitch, type ScoreProject } from "../../domain/score/types.ts";
+import { type KeySignature, type PedalEvent, type PianoPitch, type PianoStaffName, type ScoreProject } from "../../domain/score/types.ts";
 
 export type PreviewPedalEvent = {
   measureOffset: number;
   position: number;
   type: PedalEvent['action'] | 'resume' | 'discontinue';
 };
+export type PreviewOttavaEvent = { measureOffset: number; position: number; staff: PianoStaffName; type: 'up' | 'down' | 'stop' };
 
 namespace PreviewMusicXml {
   export const spellPitch = PitchSpelling.forPreview;
@@ -55,6 +57,7 @@ namespace PreviewMusicXml {
     const clefs = ScoreClef.changes(clefProject);
     const clefXml = (clef: Clef, number: number) => `<clef number="${number}"><sign>${clef === 'treble' ? 'G' : 'F'}</sign><line>${clef === 'treble' ? 2 : 4}</line></clef>`;
     const tempos = ScoreTempo.changes(tempoProject);
+    const ottavaEvents = ScoreOttava.events({ outline });
     const beat = Meter.beatLength(initial.timeSignature);
     const beatLength = beat.cnt / beat.unit * 16;
     const tempoDirection = (bpm: number, offset: number) => `<direction placement="above"><direction-type><metronome><beat-unit>${beat.unit === 8 ? beat.cnt === 3 ? 'quarter' : 'eighth' : 'quarter'}</beat-unit>${beat.cnt === 3 ? '<beat-unit-dot/>' : ''}<per-minute>${bpm}</per-minute></metronome></direction-type><offset sound="yes">${Math.round(offset * ticksPerSixteenth)}</offset><staff>1</staff><sound tempo="${bpm * beatLength / 4}"/></direction>`;
@@ -81,7 +84,8 @@ namespace PreviewMusicXml {
     const noteResolution = visible.reduce((resolution, measure) => [measure.data.upperStaff, measure.data.lowerStaff].reduce((staffResolution, staff) =>
       staff.voices.reduce((voiceResolution, voice) => ScoreVoice.flatten(voice, measure.data.length).reduce((value, entry) => MusicalTime.lcm(value, entry.lengthTime.denominator), voiceResolution), staffResolution), resolution), 2);
     const ticksPerSixteenth = visible.reduce((resolution, measure) =>
-      (measure.data.pedalEvents ?? []).reduce((value, event) => MusicalTime.lcm(value, event.offset.denominator), resolution), noteResolution);
+      [...(measure.data.pedalEvents ?? []), ...(measure.data.ottavaEvents ?? [])]
+        .reduce((value, event) => MusicalTime.lcm(value, event.offset.denominator), resolution), noteResolution);
     // A preview is only a window into the score. Reconstruct its incoming pedal state
     // without inserting events into the saved project.
     let pedalDown = false;
@@ -89,6 +93,33 @@ namespace PreviewMusicXml {
     for (const measure of measures.slice(0, firstIndex)) {
       for (const event of [...(measure.data.pedalEvents ?? [])].sort((a, b) => MusicalTime.compare(a.offset, b.offset))) {
         pedalDown = event.action !== 'stop';
+      }
+    }
+    const ottavas: PreviewOttavaEvent[] = [];
+    const visibleStart = measures.slice(0, firstIndex).reduce((sum, measure) => sum + measure.data.length.cnt / measure.data.length.unit * 16, 0);
+    const visibleEnd = visibleStart + visible.reduce((sum, measure) => sum + measure.data.length.cnt / measure.data.length.unit * 16, 0);
+    const visibleOttavaEvents = ottavaEvents.filter(event => event.position >= visibleStart && event.position <= visibleEnd);
+    for (const staff of ['upperStaff', 'lowerStaff'] as const) {
+      const prior = ottavaEvents.filter(event => event.staff === staff && event.position < visibleStart).at(-1);
+      if (prior?.action === 'start') ottavas.push({ measureOffset: 0, position: 0, staff, type: staff === 'upperStaff' ? 'down' : 'up' });
+      for (const event of visibleOttavaEvents.filter(event => event.staff === staff)) {
+        const relative = event.position - visibleStart;
+        const ownerIndex = visible.findIndex((measure, index) => {
+          const start = visible.slice(0, index).reduce((sum, entry) => sum + entry.data.length.cnt / entry.data.length.unit * 16, 0);
+          const end = start + measure.data.length.cnt / measure.data.length.unit * 16;
+          return relative >= start && (relative < end || (index === visible.length - 1 && relative === end));
+        });
+        if (ownerIndex < 0) continue;
+        const measureStart = visible.slice(0, ownerIndex).reduce((sum, entry) => sum + entry.data.length.cnt / entry.data.length.unit * 16, 0);
+        ottavas.push({ measureOffset: ownerIndex, position: relative - measureStart, staff,
+          type: event.action === 'stop' ? 'stop' : staff === 'upperStaff' ? 'down' : 'up' });
+      }
+      const stateAtEnd = ottavaEvents.filter(event => event.staff === staff && event.position < visibleEnd).at(-1);
+      const hasEndEvent = visibleOttavaEvents.some(event => event.staff === staff && event.position === visibleEnd && event.action === 'stop');
+      if (stateAtEnd?.action === 'start' && !hasEndEvent) {
+        const lastIndex = visible.length - 1;
+        const lastLength = visible[lastIndex].data.length.cnt / visible[lastIndex].data.length.unit * 16;
+        ottavas.push({ measureOffset: lastIndex, position: lastLength, staff, type: 'stop' });
       }
     }
     const pitchXml = (pitch: PianoPitch, key: KeySignature) => {
@@ -118,6 +149,12 @@ namespace PreviewMusicXml {
         body += `<direction placement="below"><direction-type><pedal type="${event.type}" line="yes" sign="no" number="1"/></direction-type><offset>${event.offset.numerator * (ticksPerSixteenth / event.offset.denominator)}</offset><staff>2</staff></direction>`;
         pedals.push({ measureOffset: index, position: MusicalTime.toNumber(event.offset), type: event.type });
         pedalDown = event.type !== 'stop';
+      }
+      for (const event of ottavas.filter(event => event.measureOffset === index)) {
+        const number = event.staff === 'upperStaff' ? 1 : 2;
+        const placement = event.staff === 'upperStaff' ? 'above' : 'below';
+        const offset = Math.round(event.position * ticksPerSixteenth);
+        body += `<direction placement="${placement}"><direction-type><octave-shift type="${event.type}" size="8" number="${number}"/></direction-type><offset>${offset}</offset><staff>${number}</staff></direction>`;
       }
       if (index === visible.length - 1 && pedalDown) {
         // A clipped/open line has no release hook. This is presentation only.
@@ -183,6 +220,7 @@ namespace PreviewMusicXml {
       noteTargets,
       activeOffset: activeIndex - firstIndex,
       pedals,
+      ottavas,
       xml: '<?xml version="1.0" encoding="UTF-8"?>' +
         '<score-partwise version="4.0"><part-list><score-part id="P1"><part-name>Piano</part-name></score-part></part-list>' +
         `<part id="P1">${content}</part></score-partwise>`,

@@ -5,14 +5,19 @@
   import ScoreKey from "./domain/score/score-key.ts";
 
   import NoteEditor from './action/editor/note-editor';
+  import OutlineEditor from './action/editor/outline-editor.ts';
   import PedalEditor from './action/editor/pedal-editor';
+  import OttavaEditor from './action/editor/ottava-editor.ts';
   import PedalInput from './state/pedal-input.ts';
+  import OttavaInput from './state/ottava-input.ts';
   import { cycleGraceFocus, focusGraceParent, getFocusedGrace } from './state/grace-input';
   import { createPedalCursor } from './state/pedal';
+  import { createOttavaCursor } from './state/ottava.ts';
   import OutlinePanel from './components/OutlinePanel.svelte';
   import TimelinePanel from './components/TimelinePanel.svelte';
   import NoteMenu from './components/NoteMenu.svelte';
   import ExpressionModal from './components/ExpressionModal.svelte';
+  import FloatingTextInput from './components/FloatingTextInput.svelte';
 
   import NoteSettings, { type NoteSettingsState } from './state/note-settings.ts';
 
@@ -48,8 +53,26 @@
   let menuPath = $state<number[] | null>(null);
   let noteSettings=$state<NoteSettingsState|null>(null);
   let passageClipboard = $state<ScorePassageData | null>(null);
+  let sectionTextInput = $state<{ blockId: string; anchor: HTMLElement; value: string } | null>(null);
+  function openSectionTextInput() {
+    if (mode !== 'outline') return false;
+    const block = project.outline.find(entry => entry.id === outlineCursor.blockId);
+    if (block?.type !== 'section') return false;
+    const anchor = document.querySelector<HTMLElement>(`[data-block-id="${CSS.escape(block.id)}"]`);
+    if (!anchor) return false;
+    sectionTextInput = { blockId: block.id, anchor, value: block.data.name };
+    keyHold.reset();
+    return true;
+  }
+  function commitSectionText(value: string) {
+    if (!sectionTextInput) return;
+    const previousProject = project;
+    project = OutlineEditor.renameSection(project, sectionTextInput.blockId, value);
+    sectionTextInput = null;
+    recordProjectChange(previousProject);
+  }
   function openExpressionModal() {
-    if(mode!=='timeline'||pedalMode)return;
+    if(mode!=='timeline'||pedalMode||ottavaMode)return;
     const editor=NoteSettings.open(project,timelineCursor);
     if(!editor)return;
     noteSettings=editor;
@@ -71,6 +94,8 @@
   }
   let pedalMode = $state(false);
   let pedalCursor = $state(createPedalCursor());
+  let ottavaMode = $state(false);
+  let ottavaCursor = $state(createOttavaCursor());
   function captureHistorySnapshot(): EditorHistorySnapshot {
     return {
       project,
@@ -79,6 +104,8 @@
       mode,
       pedalMode,
       pedalCursor: { ...pedalCursor, value: { ...pedalCursor.value } },
+      ottavaMode,
+      ottavaCursor: { ...ottavaCursor, value: { ...ottavaCursor.value } },
     };
   }
   const editorHistory = EditorHistory.create(captureHistorySnapshot());
@@ -92,6 +119,8 @@
     mode = snapshot.mode;
     pedalMode = snapshot.pedalMode;
     pedalCursor = { ...snapshot.pedalCursor, value: { ...snapshot.pedalCursor.value } };
+    ottavaMode = snapshot.ottavaMode;
+    ottavaCursor = { ...snapshot.ottavaCursor, value: { ...snapshot.ottavaCursor.value } };
   }
   const isEditingInitialKey = $derived(mode === 'outline' &&
     project.outline.some(block => block.id === outlineCursor.blockId && (block.type === 'init' || block.type === 'key-change')) && keyHold.keySignatureEditing);
@@ -177,7 +206,7 @@
     if ((event.ctrlKey || event.metaKey) && !event.altKey &&
       (historyKey === 'c' || historyKey === 'v')) {
       event.preventDefault();
-      if (event.repeat || mode !== 'timeline' || pedalMode || playback?.playing || getFocusedGrace(project.outline, timelineCursor)) return;
+      if (event.repeat || mode !== 'timeline' || pedalMode || ottavaMode || playback?.playing || getFocusedGrace(project.outline, timelineCursor)) return;
       if (historyKey === 'c') {
         passageClipboard = NoteEditor.copyPassage(project, timelineCursor) ?? null;
         return;
@@ -224,8 +253,12 @@
       if (!event.repeat) openExpressionModal();
       return;
     }
+    if (mode === 'outline' && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey && event.key.toLowerCase() === 'w') {
+      if (openSectionTextInput()) event.preventDefault();
+      return;
+    }
     if (event.key.toLowerCase() === 'm' && !event.ctrlKey && !event.altKey && !event.metaKey) {
-      if (mode === 'timeline' && !pedalMode && !getFocusedGrace(project.outline, timelineCursor) && selectedTimelineNotes.length >= 1) {
+      if (mode === 'timeline' && !pedalMode && !ottavaMode && !getFocusedGrace(project.outline, timelineCursor) && selectedTimelineNotes.length >= 1) {
         event.preventDefault();
         if (!event.repeat) { keyHold.reset(); menuPath = [0]; }
       }
@@ -236,8 +269,21 @@
       if (!event.repeat) {
         pedalMode = !pedalMode;
         if (pedalMode) {
+          ottavaMode = false;
           pedalCursor = { ...pedalCursor, position: timelineCursor.positionSixteenths };
           const block = ScoreTimeline.blockAt(project.outline, pedalCursor.position);
+          if (block) outlineCursor = { blockId: block.id };
+        } else syncOutlineToTimelinePosition(timelineCursor.positionSixteenths);
+      }
+      return;
+    }
+    if (mode === 'timeline' && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey && event.key.toLowerCase() === 'o' && !pedalMode) {
+      event.preventDefault();
+      if (!event.repeat) {
+        ottavaMode = !ottavaMode;
+        if (ottavaMode) {
+          ottavaCursor = { ...ottavaCursor, position: timelineCursor.positionSixteenths };
+          const block = ScoreTimeline.blockAt(project.outline, ottavaCursor.position);
           if (block) outlineCursor = { blockId: block.id };
         } else syncOutlineToTimelinePosition(timelineCursor.positionSixteenths);
       }
@@ -253,6 +299,19 @@
       if(result.outlineBlockId)outlineCursor={blockId:result.outlineBlockId};
       if(result.command?.type==='add')project=PedalEditor.add(project,result.command.position,result.command.action);
       else if(result.command?.type==='remove')project=PedalEditor.remove(project,result.command.position);
+      recordProjectChange(previousProject);
+      return;
+    }
+    if(ottavaMode && !(event.shiftKey && event.key.toLowerCase() === 'r')){
+      const result=OttavaInput.control(project,ottavaCursor,timelineCursor.staff,event);
+      if(!result.handled)return;
+      event.preventDefault();
+      const previousProject=project;
+      ottavaCursor=result.cursor;
+      if(result.exit){ottavaMode=false;syncOutlineToTimelinePosition(timelineCursor.positionSixteenths);}
+      if(result.outlineBlockId)outlineCursor={blockId:result.outlineBlockId};
+      if(result.command?.type==='add')project=OttavaEditor.add(project,result.command.position,result.command.staff,result.command.action);
+      else if(result.command?.type==='remove')project=OttavaEditor.remove(project,result.command.position,result.command.staff);
       recordProjectChange(previousProject);
       return;
     }
@@ -317,7 +376,7 @@
     <h1>CLAVIER<span>DESK</span></h1>
     <div class="mode-labels" aria-label="Editing modes">
       <span class:active={mode === 'outline'}>Outline</span>
-      <span class:active={mode === 'timeline'}>Timeline{pedalMode ? ' / Pedal' : ''}</span>
+      <span class:active={mode === 'timeline'}>Timeline{pedalMode ? ' / Pedal' : ottavaMode ? ' / Ottava' : ''}</span>
     </div>
     <p class="editing-target">
       {mode === 'outline' ? 'Both staves' : timelineCursor.staff === 'upperStaff' ? 'Upper staff' : 'Lower staff'}
@@ -338,9 +397,15 @@
       outline={project.outline}
       trills={project.trills}
       cursor={outlineCursor}
-      timelineCursor={pedalMode ? { ...timelineCursor, positionSixteenths: pedalCursor.position, focusedNoteId: null, selectionAnchorNoteId: null } : timelineCursor}
+      timelineCursor={pedalMode
+        ? { ...timelineCursor, positionSixteenths: pedalCursor.position, focusedNoteId: null, selectionAnchorNoteId: null }
+        : ottavaMode
+          ? { ...timelineCursor, positionSixteenths: ottavaCursor.position, focusedNoteId: null, selectionAnchorNoteId: null }
+          : timelineCursor}
       {pedalMode}
       {pedalCursor}
+      {ottavaMode}
+      {ottavaCursor}
       {playbackPosition}
       playbackActive={playbackPosition !== null}
       expressionModalOpen={noteSettings !== null}
@@ -354,6 +419,10 @@
 {#if menuPath && timelineCursor.focusedNoteId}
   <NoteMenu path={menuPath} noteId={timelineCursor.focusedNoteId} items={createNoteMenuItems(project, selectedTimelineNotes.map(entry => entry.note.id))}
     choose={(path) => menuKey('Enter', path)} close={closeMenu} />
+{/if}
+{#if sectionTextInput}
+  <FloatingTextInput anchor={sectionTextInput.anchor} value={sectionTextInput.value} maxLength={32} label="Section name"
+    onCommit={commitSectionText} onCancel={() => sectionTextInput = null} />
 {/if}
 {#if noteSettings}
   <ExpressionModal target={noteSettings.target} editor={noteSettings.expression}

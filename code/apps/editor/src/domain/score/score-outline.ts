@@ -9,6 +9,7 @@ import ScoreMeasure from "./score-measure.ts";
 import { type KeySignature, type PianoStaff, type ScoreProject } from "./types.ts";
 
 import ScorePedal from './score-pedal.ts';
+import ScoreOttava from './score-ottava.ts';
 
 
 
@@ -109,6 +110,8 @@ namespace ScoreOutline {
     if (!Number.isInteger(nextLength) || nextLength < step || nextLength > standardLength) return outline;
     if (block.data.pedalEvents?.some(event => MusicalTime.toNumber(event.offset) > nextLength ||
       (MusicalTime.toNumber(event.offset) === nextLength && event.action !== 'stop'))) return outline;
+    if (block.data.ottavaEvents?.some(event => MusicalTime.toNumber(event.offset) > nextLength ||
+      (MusicalTime.toNumber(event.offset) === nextLength && event.action !== 'stop'))) return outline;
 
     // Check every voice before rebuilding anything; shortening never truncates notes.
     if (direction === -1 && [block.data.upperStaff, block.data.lowerStaff].some((staff) => staff.voices.some((voice) =>
@@ -165,7 +168,7 @@ namespace ScoreOutline {
     // An adjacent section may replace the first section, regardless of its ID.
     if (nextOutline[1]?.type !== 'section') return { outline, blockId };
     return {
-      outline: ScorePedal.reconcile(ScoreTies.reconcile(nextOutline as ScoreProject['outline'])),
+      outline: ScoreOttava.reconcile(ScorePedal.reconcile(ScoreTies.reconcile(nextOutline as ScoreProject['outline']))),
       blockId: nextOutline[index - 1].id,
     };
   }
@@ -229,6 +232,14 @@ namespace ScoreOutline {
     });
 
     return nextOutline as ScoreProject['outline'];
+  }
+
+  export function renameSection(outline: ScoreProject['outline'], blockId: string, name: string) {
+    const block = outline.find(entry => entry.id === blockId);
+    const normalized = name.trim();
+    if (block?.type !== 'section' || !normalized || normalized === block.data.name) return outline;
+    return outline.map(entry => entry.id === block.id
+      ? { ...block, data: { ...block.data, name: normalized } } : entry) as ScoreProject['outline'];
   }
 
 }

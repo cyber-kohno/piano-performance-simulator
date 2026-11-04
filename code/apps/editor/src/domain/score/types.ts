@@ -77,10 +77,17 @@ export type PedalEvent = {
   offset: Rational;
   action: 'start' | 'change' | 'stop';
 };
+export type OttavaEvent = {
+  id: string;
+  /** Local musical position, measured in sixteenth notes, independent of notes and voices. */
+  offset: Rational;
+  staff: PianoStaffName;
+  action: 'start' | 'stop';
+};
 export type MeasureBlock = {
   id: string;
   type: 'measure';
-  data: { length: MeasureLength; upperStaff: PianoStaff; lowerStaff: PianoStaff; pedalEvents?: PedalEvent[] };
+  data: { length: MeasureLength; upperStaff: PianoStaff; lowerStaff: PianoStaff; pedalEvents?: PedalEvent[]; ottavaEvents?: OttavaEvent[] };
 };
 export type KeyChangeBlock = { id: string; type: 'key-change'; data: { keySignature: KeySignature } };
 export type OutlineBlock = InitialValuesBlock | SectionBlock | MeasureBlock | KeyChangeBlock;

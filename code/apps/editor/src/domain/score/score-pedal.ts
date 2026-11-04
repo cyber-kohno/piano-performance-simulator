@@ -27,14 +27,42 @@ namespace ScorePedal {
     if (!Number.isFinite(position) || position < 0 || position > length || (position === length && action !== 'stop')) return project;
     const events = ScorePedal.events(project);
     if (events.some(event => event.position === position)) return project;
-    const previous = events.filter(event => event.position < position).at(-1);
+    const nextIndex = events.findIndex(event => event.position > position);
+    const previousIndex = nextIndex < 0 ? events.length - 1 : nextIndex - 1;
+    const previous = previousIndex >= 0 ? events[previousIndex] : undefined;
+    const following = events.slice(previousIndex + 1);
     const down = previous !== undefined && previous.action !== 'stop';
-    if ((action === 'start') === down) return project;
     const removed = new Set<string>();
-    // Starting earlier merges with the following span; stopping earlier trims its remaining events.
-    const following = events.filter(event => event.position > position);
-    if (action === 'start' && following[0]?.action === 'start') removed.add(following[0].id);
-    if (action === 'stop') {
+    let moved: PedalEvent | undefined;
+
+    if (action === 'start' && down) {
+      // Move the active span's start forward, but never across a retake.
+      if (previous?.action !== 'start') return project;
+      moved = previous;
+    } else if (action === 'start') {
+      // In a gap, move the next start earlier; otherwise create a new open span.
+      const nextStart = following.find(event => event.action === 'start');
+      if (nextStart) { moved = nextStart; }
+    } else if (action === 'change') {
+      if (!down) return project;
+    } else if (action === 'stop' && down) {
+      // A stop can shorten an unbroken span. Once a retake exists, only the
+      // final segment may be shortened with a stop.
+      if (following.some(event => event.action === 'change')) return project;
+      moved = following.find(event => event.action === 'stop');
+    } else if (action === 'stop') {
+      // Extend the preceding span through the gap, stopping before the next start.
+      if (previous?.action !== 'stop') return project;
+      const nextStart = following.find(event => event.action === 'start');
+      if (nextStart && position >= nextStart.position) return project;
+      moved = previous;
+    } else {
+      return project;
+    }
+
+    if (moved) removed.add(moved.id);
+    if (action === 'stop' && down) {
+      // An earlier stop removes intervening changes and the old stop.
       for (const event of following) {
         if (event.action === 'start') break;
         removed.add(event.id);
@@ -44,7 +72,9 @@ namespace ScorePedal {
     const owner = measures.find(entry => position >= entry.start && position < entry.start + entry.length)
       ?? (position === length ? measures.at(-1) : undefined);
     if (!owner) return project;
-    const event: PedalEvent = { id: `pedal-${crypto.randomUUID()}`, offset: MusicalTime.fromNumber(position - owner.start), action };
+    const event: PedalEvent = moved
+      ? { ...moved, offset: MusicalTime.fromNumber(position - owner.start) }
+      : { id: `pedal-${crypto.randomUUID()}`, offset: MusicalTime.fromNumber(position - owner.start), action };
     return {
       ...project, outline: project.outline.map(block => {
         if (block.type !== 'measure') return block;

@@ -16,6 +16,9 @@ namespace OutlineEditor {
   export function addSection(project: ScoreProject, cursor: OutlineCursor) {
     return commit(project, ScoreOutline.addSection(project.outline, cursor.blockId));
   }
+  export function renameSection(project: ScoreProject, blockId: string, name: string) {
+    return commit(project, ScoreOutline.renameSection(project.outline, blockId, name));
+  }
   export function addKeyChange(project: ScoreProject, cursor: OutlineCursor) {
     return finish(project, ScoreOutline.addKeyChange(project.outline, cursor.blockId));
   }

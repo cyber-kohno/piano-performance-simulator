@@ -12,7 +12,9 @@
 
   import { getFocusedGrace, getGraceRollLayout } from '../state/grace-input';
   import type { PedalCursor } from '../state/pedal';
+  import type { OttavaCursor } from '../state/ottava.ts';
   import ScorePedal from '../domain/score/score-pedal.ts';
+  import ScoreOttava from '../domain/score/score-ottava.ts';
   import ScorePreview from './ScorePreview.svelte';
   import PlaybackPosition from './PlaybackPosition.svelte';
 
@@ -27,7 +29,7 @@
     type TimelineCursor,
   } from "../state/timeline-cursor";
 
-  let { outline, cursor, timelineCursor, mode, pedalMode = false, pedalCursor, playbackPosition = null, playbackActive = false, expressionModalOpen = false, trills = [], tempoChanges = [], clefChanges = [], slurs = [] }: {
+  let { outline, cursor, timelineCursor, mode, pedalMode = false, pedalCursor, ottavaMode = false, ottavaCursor, playbackPosition = null, playbackActive = false, expressionModalOpen = false, trills = [], tempoChanges = [], clefChanges = [], slurs = [] }: {
     slurs?: ScoreProject['slurs'];
     tempoChanges?: ScoreProject['tempoChanges'];
     clefChanges?: ScoreProject['clefChanges'];
@@ -37,8 +39,10 @@
     timelineCursor: TimelineCursor;
     mode: 'outline' | 'timeline';
     pedalMode?: boolean;
+    ottavaMode?: boolean;
     expressionModalOpen?: boolean;
     pedalCursor: PedalCursor;
+    ottavaCursor: OttavaCursor;
     playbackPosition?: number | null;
     playbackActive?: boolean;
   } = $props();
@@ -51,6 +55,8 @@
   const pedalEvents = $derived(ScorePedal.events({ outline }));
   const pedalSpans = $derived(ScorePedal.spans({ outline }, { splitAtChanges: true }));
   const pedalChangePositions = $derived(new Set(pedalEvents.filter(event => event.action === 'change').map(event => event.position)));
+  const ottavaEvents = $derived(ScoreOttava.events({ outline }, timelineCursor.staff));
+  const ottavaSpans = $derived(ScoreOttava.spans({ outline }, timelineCursor.staff));
   function syncPedalScroll() {
     if (pedalViewport && pianoRollViewport) pedalViewport.scrollLeft = pianoRollViewport.scrollLeft;
   }
@@ -254,7 +260,7 @@
   });
 </script>
 
-<section class="timeline" class:pedal-mode={pedalMode} class:expression-modal-open={expressionModalOpen} aria-label="Timeline panel">
+<section class="timeline" class:pedal-mode={pedalMode || ottavaMode} class:expression-modal-open={expressionModalOpen} aria-label="Timeline panel">
   <div class="corner" aria-hidden="true"></div>
   <section class="time-header" aria-label="Time header">
     <div class="event-row" aria-label="Event row"></div>
@@ -291,7 +297,7 @@
         <div
           class="pitch-row"
           class:sharp={pitch.isSharp}
-          class:cursor-pitch={playbackPosition === null && mode === 'timeline' && timelineCursor.pitch === pitch.midi}
+          class:cursor-pitch={playbackPosition === null && mode === 'timeline' && !ottavaMode && timelineCursor.pitch === pitch.midi}
           role="listitem"
         >
           {pitch.label}
@@ -305,7 +311,7 @@
       {#if playbackPosition !== null}
         <PlaybackPosition position={playbackPosition} {pixelsPerSixteenth} />
       {/if}
-      {#if playbackPosition === null && mode === 'timeline' && !pedalMode && timelineCursor.focusedNoteId === null}
+      {#if playbackPosition === null && mode === 'timeline' && !pedalMode && !ottavaMode && timelineCursor.focusedNoteId === null}
         <div
           class="timeline-cursor"
           class:invalid={cursorPlacementInvalid}
@@ -326,7 +332,7 @@
           <span class:fixed-input={inputTuplet !== undefined}>Input {WrittenValue.label(inputValue)}{inputTuplet ? ' T' : ''}</span>
         </span>
       {/if}
-      {#if playbackPosition === null && mode === 'timeline' && !pedalMode && focusedNote}
+      {#if playbackPosition === null && mode === 'timeline' && !pedalMode && !ottavaMode && focusedNote}
         <span
           class="note-value-badge note-focused-value-badge"
           style={`left: ${(focusedNote.measureStartSixteenths + focusedNote.positionSixteenths) * pixelsPerSixteenth + focusedGraceX + 4}px; top: ${pitchTopMargin + (108 - timelineCursor.pitch) * pitchRowHeight - 52}px`}
@@ -410,7 +416,7 @@
                 class:chromatic={!ScoreKey.contains(measureKeyCache, measure.id, pitch.midi)}
                 class:unselected={mode === 'timeline' && entry.staff === timelineCursor.staff && selectedNotes.length <= 1 && timelineCursor.focusedNoteId === note.id && timelineCursor.focusedPitchIndex !== pitchIndex}
                 aria-label={`${entry.staff === 'upperStaff' ? 'Upper' : 'Lower'} staff note ${note.id}`}
-                aria-current={mode === 'timeline' && !pedalMode && !focusedGrace && entry.staff === timelineCursor.staff && timelineCursor.focusedNoteId === note.id && timelineCursor.focusedPitchIndex === pitchIndex ? 'true' : undefined}
+                aria-current={mode === 'timeline' && !pedalMode && !ottavaMode && !focusedGrace && entry.staff === timelineCursor.staff && timelineCursor.focusedNoteId === note.id && timelineCursor.focusedPitchIndex === pitchIndex ? 'true' : undefined}
                 style={`left: ${entry.position * pixelsPerSixteenth}px; top: ${pitchTopMargin + (108 - pitch.midi) * pitchRowHeight}px; width: ${entry.displayLength * pixelsPerSixteenth}px; --active-note-height: ${activeNoteHeight}px`}
               >{#if note.staccato && pitchIndex === 0}<span class="staccato-mark" aria-label={note.staccato.type === 'normal' ? 'Staccato' : 'Staccatissimo'}>{note.staccato.type === 'normal' ? '•' : '▾'}</span>{/if}</div>
             {/each}
@@ -504,6 +510,37 @@
       </div>
     </section>
   {/if}
+  {#if ottavaMode}
+    <div class="pedal-label ottava-label"><span>{timelineCursor.staff === 'upperStaff' ? 'Upper' : 'Lower'}</span><span>{timelineCursor.staff === 'upperStaff' ? '8va' : '8vb'}</span></div>
+    <section class="pedal-lane ottava-lane" aria-label={`${timelineCursor.staff === 'upperStaff' ? 'Upper staff 8va' : 'Lower staff 8vb'} editing lane`} bind:this={pedalViewport}>
+      <div class="pedal-track">
+        <div class="pedal-ruler">
+          {#each headerMeasures as measure (measure.id)}
+            <div class="pedal-measure" style={`width: ${measure.width}px`}>
+              <span>{measure.number}</span>
+              {#each measure.ticks as tick (tick.position)}<i class:major={tick.kind === 'bar' || tick.kind === 'beat'} style={`left: ${tick.position}px`}></i>{/each}
+            </div>
+          {/each}
+        </div>
+        {#if playbackPosition === null}
+          <div class="pedal-unit-range" aria-hidden="true" style={`left: ${ottavaCursor.position * pixelsPerSixteenth}px; width: ${WrittenValue.sixteenths(ottavaCursor.value) * pixelsPerSixteenth}px`}></div>
+        {/if}
+        {#each ottavaSpans as span (`${span.start}-${span.end}`)}
+          <div class="ottava-span" style={`left: ${span.start * pixelsPerSixteenth}px; width: ${Math.max(0, (span.end - span.start) * pixelsPerSixteenth)}px`}>
+            <span>{timelineCursor.staff === 'upperStaff' ? '8va' : '8vb'}</span>
+          </div>
+        {/each}
+        {#each ottavaEvents as event (event.id)}
+          <span class="pedal-event" class:release={event.action === 'stop'} role="img" aria-label={`Ottava ${event.action} at ${event.position}`} style={`left: ${event.position * pixelsPerSixteenth}px`}></span>
+        {/each}
+        {#if playbackPosition === null}
+          <div class="pedal-cursor" style={`left: ${ottavaCursor.position * pixelsPerSixteenth}px`}>
+            <span class="note-value-badge pedal-input-badge">Input {WrittenValue.label(ottavaCursor.value)}</span>
+          </div>
+        {/if}
+      </div>
+    </section>
+  {/if}
   {#if mode === 'timeline' && !expressionModalOpen}
   <aside class="selection-status" aria-label="Current measure, staff and voice">
     <div class="selection-status-measure">Measure {statusMeasureNumber ?? '—'}</div>
@@ -521,7 +558,7 @@
     {/each}
   </aside>
     <ScorePreview {outline} {trills} {tempoChanges} {clefChanges} {slurs}
-      selectedNoteIds={playbackPosition !== null || pedalMode ? [] : selectedNotes.map(entry => entry.note.id)} activeIndex={(statusMeasureNumber ?? 0) - 1} />
+      selectedNoteIds={playbackPosition !== null || pedalMode || ottavaMode ? [] : selectedNotes.map(entry => entry.note.id)} activeIndex={(statusMeasureNumber ?? 0) - 1} />
   {/if}
 </section>
 
@@ -547,6 +584,7 @@
 
   .timeline.pedal-mode { grid-template-rows: var(--timeline-header-height) minmax(0, 1fr) 64px; }
   .pedal-label { grid-row: 3; grid-column: 1; padding: 8px; background: #c2d9db; border-top: 1px solid #829fa2; }
+  .ottava-label { display: flex; flex-direction: column; justify-content: center; gap: 3px; line-height: 1.15; }
   .pedal-lane { grid-row: 3; grid-column: 2; overflow: hidden; background: #e0eded; border-top: 1px solid #829fa2; min-width: 0; container-type: inline-size; }
   .pedal-track { position: relative; width: max-content; min-width: 100%; height: 64px; padding-right: 50cqw; }
   .pedal-ruler { display: flex; height: 20px; }
@@ -556,6 +594,8 @@
   .pedal-measure i.major { height: 10px; background: #617e81; }
   .pedal-unit-range { position: absolute; top: 0; height: 20px; background: rgba(245, 149, 48, 0.22); pointer-events: none; }
   .pedal-span { position: absolute; top: 50px; height: 10px; background: linear-gradient(to right, rgb(88, 124, 136), rgba(88, 124, 136, 0.3)); }
+  .ottava-span { position: absolute; top: 32px; height: 18px; border-top: 2px solid #587c88; border-right: 2px solid #587c88; border-left: 2px solid #587c88; box-sizing: border-box; color: #304b55; font: italic 600 13px Georgia, serif; }
+  .ottava-span span { position: absolute; left: 4px; top: -17px; padding: 0 3px; background: #e0eded; }
   .pedal-event { position: absolute; top: 33px; width: 10px; height: 16px; transform: translateX(-50%); background: #d93636; z-index: 4; }
   .pedal-event.release { background: #3478d4; }
   .pedal-event.retake { background: #ebc532; }
