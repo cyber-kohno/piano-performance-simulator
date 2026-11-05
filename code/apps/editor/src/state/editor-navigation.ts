@@ -10,7 +10,8 @@ namespace EditorNavigation {
   }
   export function toggle(state: WorkspaceState): WorkspaceState {
     if (state.mode === 'timeline') return { ...state, mode: 'outline', timelineCursor: { ...state.timelineCursor, selectionAnchorNoteId: null } };
-    if (!state.project.outline.some(block => block.type === 'measure')) return state;
+    const focusedIndex = state.project.outline.findIndex(block => block.id === state.outlineCursor.blockId);
+    if (focusedIndex < 0 || !state.project.outline.slice(focusedIndex).some(block => block.type === 'measure')) return state;
     const position = ScoreTimeline.outlinePosition(state.project.outline, state.outlineCursor.blockId);
     const timelineCursor = resetTimelineCursorForStaff(state.project.outline, { ...state.timelineCursor, positionSixteenths: position }, 'upperStaff');
     const block = ScoreTimeline.blockAt(state.project.outline, position);

@@ -133,6 +133,14 @@
     ? playbackPosition : mode === 'timeline'
       ? timelineCursor.positionSixteenths : ScoreTimeline.outlinePosition(outline, cursor.blockId))?.measure);
   const statusMeasureNumber = $derived(statusMeasure ? measures.findIndex((measure) => measure.id === statusMeasure.id) + 1 : null);
+  const previewActiveIndex = $derived.by(() => {
+    if (statusMeasureNumber !== null) return statusMeasureNumber - 1;
+    if (mode !== 'outline' || !measures.length) return -1;
+    const focusedIndex = outline.findIndex(block => block.id === cursor.blockId);
+    const focusedBlock = outline[focusedIndex];
+    const hasFollowingMeasure = focusedIndex >= 0 && outline.slice(focusedIndex).some(block => block.type === 'measure');
+    return focusedBlock?.type === 'section' && !hasFollowingMeasure ? measures.length - 1 : -1;
+  });
   const staffNames = ['upperStaff', 'lowerStaff'] as const;
   const locatedNotes = $derived(ScoreTimeline.notes(outline, timelineCursor.staff, timelineCursor.voiceIndex));
   const selectedNotes = $derived(getSelectedTimelineNotes(outline, timelineCursor));
@@ -406,20 +414,27 @@
               ></div>
             {/if}
             {#each note.pitches as pitch, pitchIndex (`${note.id}-${pitch.midi}`)}
+              {@const pitchInactive = pedalMode || mode === 'outline' || entry.staff !== timelineCursor.staff || entry.voiceIndex !== timelineCursor.voiceIndex}
               <div
                 class="score-note-pitch"
                 data-fingering-pitch={`${note.id}:${pitchIndex}`}
                 id={pitchIndex === note.pitches.length - 1 ? `note-menu-anchor-${note.id}` : undefined}
-                class:inactive={pedalMode || mode === 'outline' || entry.staff !== timelineCursor.staff || entry.voiceIndex !== timelineCursor.voiceIndex}
-                class:timeline-inactive={mode === 'timeline' && (pedalMode || entry.staff !== timelineCursor.staff || entry.voiceIndex !== timelineCursor.voiceIndex)}
+                class:inactive={pitchInactive}
+                class:timeline-inactive={mode === 'timeline' && pitchInactive}
                 class:lower-staff={entry.staff === 'lowerStaff'}
-                class:diatonic={ScoreKey.contains(measureKeyCache, measure.id, pitch.midi)}
-                class:chromatic={!ScoreKey.contains(measureKeyCache, measure.id, pitch.midi)}
+                class:spelling-default={!pitch.spellingDirection}
+                class:spelling-up={pitch.spellingDirection === 'up'}
+                class:spelling-down={pitch.spellingDirection === 'down'}
                 class:unselected={mode === 'timeline' && entry.staff === timelineCursor.staff && selectedNotes.length <= 1 && timelineCursor.focusedNoteId === note.id && timelineCursor.focusedPitchIndex !== pitchIndex}
                 aria-label={`${entry.staff === 'upperStaff' ? 'Upper' : 'Lower'} staff note ${note.id}`}
                 aria-current={mode === 'timeline' && !pedalMode && !ottavaMode && !focusedGrace && entry.staff === timelineCursor.staff && timelineCursor.focusedNoteId === note.id && timelineCursor.focusedPitchIndex === pitchIndex ? 'true' : undefined}
                 style={`left: ${entry.position * pixelsPerSixteenth}px; top: ${pitchTopMargin + (108 - pitch.midi) * pitchRowHeight}px; width: ${entry.displayLength * pixelsPerSixteenth}px; --active-note-height: ${activeNoteHeight}px`}
               >{#if note.staccato && pitchIndex === 0}<span class="staccato-mark" aria-label={note.staccato.type === 'normal' ? 'Staccato' : 'Staccatissimo'}>{note.staccato.type === 'normal' ? '•' : '▾'}</span>{/if}</div>
+              {#if pitch.fingering !== undefined}
+                <span class="fingering-badge" aria-hidden="true"
+                  style={`left: ${entry.position * pixelsPerSixteenth - 2}px; top: ${pitchTopMargin + (108 - pitch.midi) * pitchRowHeight + (pitchInactive ? pitchRowHeight * 0.75 : (pitchRowHeight + activeNoteHeight) / 2) + 12}px; transform: translateY(-100%)`}
+                >{pitch.fingering}{pitch.substitutionFingering === undefined ? '' : `-${pitch.substitutionFingering}`}</span>
+              {/if}
             {/each}
             {#if note.arpeggio && note.pitches.length >= 2}
               {@const topPitch = Math.max(...note.pitches.map(pitch=>pitch.midi))}
@@ -445,7 +460,7 @@
               {/if}
               {#each grace.pitches as pitch, pitchIndex (`${grace.id}-${pitch.midi}`)}
                 <div class="score-grace-note" role="img"
-                  class:diatonic={ScoreKey.contains(measureKeyCache, measure.id, pitch.midi)} class:chromatic={!ScoreKey.contains(measureKeyCache, measure.id, pitch.midi)}
+                  class:spelling-default={!pitch.spellingDirection} class:spelling-up={pitch.spellingDirection === 'up'} class:spelling-down={pitch.spellingDirection === 'down'}
                   class:inactive={pedalMode || mode === 'outline' || entry.staff !== timelineCursor.staff || entry.voiceIndex !== timelineCursor.voiceIndex}
                   class:lower-staff={entry.staff === 'lowerStaff'}
                   class:timeline-inactive={mode === 'timeline' && (pedalMode || entry.staff !== timelineCursor.staff || entry.voiceIndex !== timelineCursor.voiceIndex)}
@@ -558,8 +573,10 @@
       </div>
     {/each}
   </aside>
+  {/if}
+  {#if !expressionModalOpen}
     <ScorePreview {outline} {trills} {tempoChanges} {clefChanges} {slurs}
-      selectedNoteIds={playbackPosition !== null || pedalMode || ottavaMode ? [] : selectedNotes.map(entry => entry.note.id)} activeIndex={(statusMeasureNumber ?? 0) - 1} />
+      selectedNoteIds={mode !== 'timeline' || playbackPosition !== null || pedalMode || ottavaMode ? [] : selectedNotes.map(entry => entry.note.id)} activeIndex={previewActiveIndex} />
   {/if}
 </section>
 
@@ -976,24 +993,45 @@
   }
 
   .score-grace-note { position: absolute; z-index: 8; border-radius: 50%; opacity: 0.92; pointer-events: none; }
-  .score-grace-note.diatonic { border: 1px solid #256b32; background: linear-gradient(#85ec84, #32bd47); }
-  .score-grace-note.chromatic { border: 1px solid #806a4e; background: linear-gradient(#d8c3a1, #ab8a61); }
+  .score-grace-note.spelling-default { border: 1px solid #256b32; background: linear-gradient(#85ec84, #32bd47); }
+  .score-grace-note.spelling-up { border: 1px solid #9a7a00; background: linear-gradient(#ffe477, #f2c230); }
+  .score-grace-note.spelling-down { border: 1px solid #a64b00; background: linear-gradient(#ffb264, #ed7d24); }
   .score-grace-note.inactive { border: 0; background: linear-gradient(to bottom, rgb(0, 0, 100), rgb(60, 60, 165) 50%, rgb(0, 0, 100)); opacity: 0.8; }
   .score-grace-note.inactive.lower-staff { background: linear-gradient(to bottom, rgb(100, 0, 0), rgb(165, 60, 60) 50%, rgb(100, 0, 0)); }
   .score-grace-note.timeline-inactive { opacity: 0.6; }
 
-  .score-note-pitch.diatonic {
+  .score-note-pitch.spelling-default {
     border: 1px solid #256b32;
     background: linear-gradient(#85ec84, #32bd47);
   }
 
-  .score-note-pitch.unselected {
-    opacity: 0.35;
+  .score-note-pitch.spelling-up {
+    border: 1px solid #9a7a00;
+    background: linear-gradient(#ffe477, #f2c230);
   }
 
-  .score-note-pitch.chromatic {
-    border: 1px solid #806a4e;
-    background: linear-gradient(#d8c3a1, #ab8a61);
+  .score-note-pitch.spelling-down {
+    border: 1px solid #a64b00;
+    background: linear-gradient(#ffb264, #ed7d24);
+  }
+
+  .score-note-pitch.unselected {
+    opacity: 1;
+  }
+
+  .score-note-pitch.unselected.spelling-default {
+    border-color: rgba(37, 107, 50, 0.35);
+    background: linear-gradient(rgba(133, 236, 132, 0.35), rgba(50, 189, 71, 0.35));
+  }
+
+  .score-note-pitch.unselected.spelling-up {
+    border-color: rgba(154, 122, 0, 0.35);
+    background: linear-gradient(rgba(255, 228, 119, 0.35), rgba(242, 194, 48, 0.35));
+  }
+
+  .score-note-pitch.unselected.spelling-down {
+    border-color: rgba(166, 75, 0, 0.35);
+    background: linear-gradient(rgba(255, 178, 100, 0.35), rgba(237, 125, 36, 0.35));
   }
 
   .score-note-pitch.inactive {
@@ -1019,9 +1057,23 @@
     margin-top: calc((var(--pitch-row-height) - var(--active-note-height)) / 2);
   }
 
+  .fingering-badge {
+    position: absolute;
+    z-index: 30;
+    padding: 3px 7px;
+    border-radius: 3px;
+    background: #152157c6;
+    color: #fff;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 12px;
+    white-space: nowrap;
+    pointer-events: none;
+  }
+
   .note-focus-column {
     position: absolute;
-    z-index: 2;
+    z-index: 0;
     top: var(--pitch-top-margin);
     bottom: var(--pitch-bottom-margin);
     background: rgba(0, 0, 0, 0.06);
@@ -1070,7 +1122,7 @@
 
   .measure-region.focused::after {
     position: absolute;
-    z-index: 2;
+    z-index: 0;
     inset: 0;
     background: #ffec3d2c;
     content: '';

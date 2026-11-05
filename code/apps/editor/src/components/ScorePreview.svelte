@@ -45,7 +45,7 @@
     grid-column: 2;
     grid-row: 2;
     position: relative;
-    z-index: 20;
+    z-index: 40;
     align-self: start;
     justify-self: end;
     box-sizing: border-box;

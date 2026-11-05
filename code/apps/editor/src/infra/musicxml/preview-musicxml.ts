@@ -150,7 +150,7 @@ namespace PreviewMusicXml {
       }
     }
     const pitchXml = (pitch: PianoPitch, key: KeySignature) => {
-      const spelling = PitchSpelling.forPreview(pitch.midi, key);
+      const spelling = PitchSpelling.forPreview(pitch.midi, key, pitch.spellingDirection);
       return `<pitch><step>${spelling.step}</step><alter>${spelling.alter}</alter><octave>${spelling.octave}</octave></pitch>`;
     };
     const content = visible.map((measure, index) => {

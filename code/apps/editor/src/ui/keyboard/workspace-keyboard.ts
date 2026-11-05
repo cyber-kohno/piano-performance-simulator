@@ -21,7 +21,7 @@ namespace WorkspaceKeyboard {
         : ScoreTimeline.measureAt(project.outline, timelineCursor.positionSixteenths)?.measure;
       const keySignature = diatonic ? (measure && measureKeyCache.get(measure.id)?.keySignature) ?? ScoreKey.at(project.outline, timelineCursor.positionSixteenths) : undefined;
       if (timelineCursor.focusedNoteId === null) {
-        timelineCursor = moveTimelineCursorPitch(timelineCursor, direction, keySignature);
+        timelineCursor = moveTimelineCursorPitch(timelineCursor, direction, keySignature, ScoreKey.at(project.outline, timelineCursor.positionSixteenths));
       } else {
         const result = NoteEditor.movePitch(project, timelineCursor, direction, keySignature, octave);
         if (result) {

@@ -3,6 +3,8 @@ import type { NoteTarget } from './note-target.ts';
 import NoteTargets from './note-target.ts';
 import ScoreNotes from './score-notes.ts';
 import PianoPitchRules from './piano-pitch-rules.ts';
+import PitchSpelling from '../theory/pitch-spelling.ts';
+import ScoreKey from './score-key.ts';
 namespace GraceNotes {
   export function find(project: ScoreProject, target: NoteTarget, graceId: string | null) {
     const parent = NoteTargets.resolve(project, target);
@@ -16,7 +18,8 @@ namespace GraceNotes {
     const selected = graces.findIndex(grace => grace.id === afterId);
     const pitch = (graces[selected]?.pitches[0].midi ?? parent.note.pitches[0].midi) - 1;
     if (pitch < PianoPitchRules.min) return undefined;
-    const grace: PianoGraceNote = { id: 'grace-' + crypto.randomUUID(), pitches: [{ midi: pitch }], value: { type: 'eighth', dots: 0 }, slash: true };
+    const spellingDirection=PitchSpelling.directionForMove(pitch,ScoreKey.forBlock(project.outline,parent.measure.id),'down');
+    const grace: PianoGraceNote = { id: 'grace-' + crypto.randomUUID(), pitches: [{ midi: pitch,...(spellingDirection?{ spellingDirection}:{}) }], value: { type: 'eighth', dots: 0 }, slash: true };
     const beforeGraceNotes = [...graces];
     beforeGraceNotes.splice(selected < 0 ? beforeGraceNotes.length : selected + 1, 0, grace);
     return { project: ScoreNotes.map(project, new Set([target.noteId]), note => ({ ...note, beforeGraceNotes }), target.staff), graceId: grace.id, pitch };
@@ -27,7 +30,12 @@ namespace GraceNotes {
     const previous = selected.grace.pitches[0].midi;
     const pitch = octave ? previous + direction * 12 : PianoPitchRules.next(previous, direction, key);
     if (pitch === undefined || pitch < PianoPitchRules.min || pitch > PianoPitchRules.max || pitch === previous) return undefined;
-    const beforeGraceNotes = selected.parent.note.beforeGraceNotes!.map(grace => grace.id !== graceId ? grace : { ...grace, pitches: [{ ...grace.pitches[0], midi: pitch }] });
+    const spellingDirection=key===undefined&&!octave ? PitchSpelling.directionForMove(pitch,ScoreKey.forBlock(project.outline,selected.parent.measure.id),direction===1?'up':'down') : undefined;
+    const beforeGraceNotes = selected.parent.note.beforeGraceNotes!.map(grace => {
+      if(grace.id!==graceId) return grace;
+      const { spellingDirection: _old, ...base }=grace.pitches[0];
+      return { ...grace, pitches: [{ ...base, midi: pitch,...(octave ? grace.pitches[0].spellingDirection===undefined?{}:{ spellingDirection:grace.pitches[0].spellingDirection } : spellingDirection?{ spellingDirection}:{}) }] };
+    });
     return { project: ScoreNotes.map(project, new Set([target.noteId]), note => ({ ...note, beforeGraceNotes }), target.staff), pitch };
   }
   export function remove(project: ScoreProject, target: NoteTarget, graceId: string) {

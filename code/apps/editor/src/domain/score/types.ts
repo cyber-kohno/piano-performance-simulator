@@ -3,8 +3,10 @@ import type { KeySignature, TimeSignature, MeasureLength, NoteValue } from '../t
 export type { KeySignature, TimeSignature, MeasureLength, NoteValue } from '../theory/notation-types.ts';
 
 export type PianoFingering = 1 | 2 | 3 | 4 | 5;
+export type SpellingDirection = 'up' | 'down';
 export type PianoPitch = {
   midi: number;
+  spellingDirection?: SpellingDirection;
   fingering?: PianoFingering;
   substitutionFingering?: PianoFingering;
 };

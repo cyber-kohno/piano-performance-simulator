@@ -18,6 +18,7 @@ function isNote(value: unknown): value is PianoNote {
   if (!isRecord(value) || value.kind !== 'note' || !isId(value.id) || !isNoteValue(value.value) ||
     !Array.isArray(value.pitches) || value.pitches.length === 0 || !value.pitches.every(pitch =>
       isRecord(pitch) && isIntegerIn(pitch.midi, 0, 127) &&
+      (pitch.spellingDirection === undefined || pitch.spellingDirection === 'up' || pitch.spellingDirection === 'down') &&
       (pitch.fingering === undefined || isIntegerIn(pitch.fingering, 1, 5)) &&
       (pitch.substitutionFingering === undefined ||
         isIntegerIn(pitch.substitutionFingering, 1, 5) && pitch.fingering !== undefined))) return false;
@@ -33,6 +34,7 @@ function isNote(value: unknown): value is PianoNote {
     isRecord(grace) && isId(grace.id) && isNoteValue(grace.value) && typeof grace.slash === 'boolean' &&
     Array.isArray(grace.pitches) && grace.pitches.length === 1 && grace.pitches.every(pitch =>
       isRecord(pitch) && isIntegerIn(pitch.midi, 0, 127) &&
+      (pitch.spellingDirection === undefined || pitch.spellingDirection === 'up' || pitch.spellingDirection === 'down') &&
       (pitch.fingering === undefined || isIntegerIn(pitch.fingering, 1, 5)) &&
       (pitch.substitutionFingering === undefined ||
         isIntegerIn(pitch.substitutionFingering, 1, 5) && pitch.fingering !== undefined))))) return false;

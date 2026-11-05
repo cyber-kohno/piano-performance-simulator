@@ -1,4 +1,6 @@
 import TupletNotes from '../domain/score/tuplet-notes.ts';
+import NotePitches from '../domain/score/note-pitches.ts';
+import ScoreTimeline from '../domain/score/score-timeline.ts';
 import WrittenValue from '../domain/theory/written-value.ts';
 import type { OutlineBlock, ScoreProject, NoteValue } from '../domain/score/types.ts';
 import type { TimelineCursor } from './timeline-cursor.ts';
@@ -15,8 +17,16 @@ export function convertFocusedTimelineTuplet(project: ScoreProject, cursor: Time
   return apply(cursor, TupletNotes.convert(project, target(cursor)));
 }
 export function addTupletTimelineNote(project: ScoreProject, cursor: TimelineCursor, position: number, pitch: number) {
-  const result = TupletNotes.add(project, target(cursor), position, pitch);
-  return result && { project: result.project, cursor: { ...cursor, positionSixteenths: result.position, focusedNoteId: result.noteId, focusedPitchIndex: 0, selectionAnchorNoteId: null, pitch } };
+  const focusedPitch = cursor.focusedNoteId
+    ? ScoreTimeline.note(project.outline, cursor.focusedNoteId, cursor.staff)?.note.pitches[cursor.focusedPitchIndex ?? 0]
+    : undefined;
+  const inputPitch = focusedPitch?.midi ?? pitch;
+  const spellingDirection = focusedPitch ? focusedPitch.spellingDirection : cursor.spellingDirection;
+  const result = TupletNotes.add(project, target(cursor), position, inputPitch);
+  if (!result) return undefined;
+  const nextProject = spellingDirection ? NotePitches.setSpellingDirection(result.project,
+    { noteId: result.noteId, staff: cursor.staff, pitchIndex: 0 }, spellingDirection) : result.project;
+  return { project: nextProject, cursor: { ...cursor, positionSixteenths: result.position, focusedNoteId: result.noteId, focusedPitchIndex: 0, selectionAnchorNoteId: null, pitch: inputPitch } };
 }
 export function setTupletNoteValue(project: ScoreProject, cursor: TimelineCursor, value: NoteValue) { return apply(cursor, TupletNotes.setValue(project, target(cursor), value)); }
 export function resizeTupletNote(project: ScoreProject, cursor: TimelineCursor, direction: -1 | 1) { return apply(cursor, TupletNotes.resize(project, target(cursor), direction)); }

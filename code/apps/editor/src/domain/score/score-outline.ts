@@ -14,6 +14,26 @@ import ScoreOttava from './score-ottava.ts';
 
 
 namespace ScoreOutline {
+  function clearSpellingDirections(outline: ScoreProject['outline']): ScoreProject['outline'] {
+    const clearNote = (note: import('./types.ts').PianoNote) => ({
+      ...note,
+      pitches: note.pitches.map(({ spellingDirection: _direction, ...pitch }) => pitch),
+      ...(note.beforeGraceNotes ? { beforeGraceNotes: note.beforeGraceNotes.map(grace => ({
+        ...grace, pitches: grace.pitches.map(({ spellingDirection: _direction, ...pitch }) => pitch),
+      })) } : {}),
+    });
+    return outline.map(block => block.type !== 'measure' ? block : ({
+      ...block, data: {
+        ...block.data,
+        upperStaff: { voices: block.data.upperStaff.voices.map(voice => ({ ...voice, elements: voice.elements.map(element =>
+          element.kind === 'note' ? clearNote(element) : element.kind === 'tuplet' ? { ...element, elements: element.elements.map(child => child.kind === 'note' ? clearNote(child) : child) } : element,
+        ) })) },
+        lowerStaff: { voices: block.data.lowerStaff.voices.map(voice => ({ ...voice, elements: voice.elements.map(element =>
+          element.kind === 'note' ? clearNote(element) : element.kind === 'tuplet' ? { ...element, elements: element.elements.map(child => child.kind === 'note' ? clearNote(child) : child) } : element,
+        ) })) },
+      },
+    })) as ScoreProject['outline'];
+  }
   // C, G, D, A, E, B, Cb, F#, Gb, C#, Db, Ab, Eb, Bb, F.
   const INITIAL_KEY_SIGNATURE_ORDER: readonly KeySignature['fifths'][] = [
     0, 1, 2, 3, 4, 5, -7, 6, -6, 7, -5, -4, -3, -2, -1,
@@ -29,10 +49,10 @@ namespace ScoreOutline {
     const fifths = INITIAL_KEY_SIGNATURE_ORDER[
       (index + direction + INITIAL_KEY_SIGNATURE_ORDER.length) % INITIAL_KEY_SIGNATURE_ORDER.length
     ];
-    return [{
+    return clearSpellingDirections([{
       ...initial,
       data: { ...initial.data, keySignature: { ...initial.data.keySignature, fifths } },
-    }, ...outline.slice(1)] as ScoreProject['outline'];
+    }, ...outline.slice(1)] as ScoreProject['outline']);
   }
 
   export function changeKey(outline: ScoreProject['outline'], blockId: string, direction: -1 | 1): ScoreProject['outline'] {
@@ -42,7 +62,7 @@ namespace ScoreOutline {
     const index = INITIAL_KEY_SIGNATURE_ORDER.indexOf(block.data.keySignature.fifths);
     if (index < 0) return outline;
     const fifths = INITIAL_KEY_SIGNATURE_ORDER[(index + direction + INITIAL_KEY_SIGNATURE_ORDER.length) % INITIAL_KEY_SIGNATURE_ORDER.length];
-    return outline.map(entry => entry.id === block.id ? { ...block, data: { keySignature: { fifths } } } : entry) as ScoreProject['outline'];
+    return clearSpellingDirections(outline.map(entry => entry.id === block.id ? { ...block, data: { keySignature: { fifths } } } : entry) as ScoreProject['outline']);
   }
 
   export function addKeyChange(outline: ScoreProject['outline'], blockId: string) {
@@ -163,12 +183,14 @@ namespace ScoreOutline {
       return { outline, blockId };
     }
 
+    const removesKey = outline[index].type === 'key-change';
     const nextOutline = [...outline];
     nextOutline.splice(index, 1);
     // An adjacent section may replace the first section, regardless of its ID.
     if (nextOutline[1]?.type !== 'section') return { outline, blockId };
     return {
-      outline: ScoreOttava.reconcile(ScorePedal.reconcile(ScoreTies.reconcile(nextOutline as ScoreProject['outline']))),
+      outline: removesKey ? clearSpellingDirections(ScoreOttava.reconcile(ScorePedal.reconcile(ScoreTies.reconcile(nextOutline as ScoreProject['outline']))))
+        : ScoreOttava.reconcile(ScorePedal.reconcile(ScoreTies.reconcile(nextOutline as ScoreProject['outline']))),
       blockId: nextOutline[index - 1].id,
     };
   }

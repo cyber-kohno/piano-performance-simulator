@@ -102,7 +102,8 @@ namespace NoteDuration {
     const limit=ScoreTimeline.length(project.outline);
     if(!NotationGrid.contains(step)||step<0.5||newEnd<=start||newEnd>limit) return undefined;
     const samePitchNames=(a: PianoNote['pitches'],b: PianoNote['pitches']) =>
-      a.length===b.length&&a.every((pitch,index) => pitch.midi===b[index].midi);
+      a.length===b.length&&a.every((pitch,index) => pitch.midi===b[index].midi&&
+        pitch.spellingDirection===b[index].spellingDirection);
     const samePitches=(a: PianoNote['pitches'],b: PianoNote['pitches']) =>
       samePitchNames(a,b)&&a.every((pitch,index) => pitch.fingering===b[index].fingering&&
         pitch.substitutionFingering===b[index].substitutionFingering);

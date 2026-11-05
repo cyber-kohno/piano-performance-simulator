@@ -30,7 +30,8 @@ namespace ScoreTies {
       if (next && next.note.tieFrom === entry.note.id && entry.scope === next.scope &&
         MusicalTime.compare(MusicalTime.fromNumber(entry.end), MusicalTime.fromNumber(next.start)) === 0 &&
         entry.note.pitches.length === next.note.pitches.length &&
-        entry.note.pitches.every((pitch, index) => pitch.midi === next.note.pitches[index].midi)) valid.add(entry.note.id);
+        entry.note.pitches.every((pitch, index) => pitch.midi === next.note.pitches[index].midi &&
+          pitch.spellingDirection === next.note.pitches[index].spellingDirection)) valid.add(entry.note.id);
     }
     const cleanStaff = (staff: PianoStaff): PianoStaff => ({
       ...staff,

@@ -17,13 +17,14 @@ namespace NoteContinuation {
     const next = notes[index + 1];
     const currentEnd = MusicalTime.addNumbers(MusicalTime.addNumbers(current.measureStartSixteenths, current.positionSixteenths), current.lengthSixteenths);
     const nextStart = next.measureStartSixteenths + next.positionSixteenths;
+    const isTied = current.note.tieTo === next.note.id && next.note.tieFrom === current.note.id;
     if (MusicalTime.compareNumbers(currentEnd, nextStart) !== 0 || current.note.pitches.length === 0 ||
       current.note.pitches.length !== next.note.pitches.length ||
-      !current.note.pitches.every((pitch, pitchIndex) => pitch.midi === next.note.pitches[pitchIndex].midi)) {
+      !isTied && !current.note.pitches.every((pitch, pitchIndex) => pitch.midi === next.note.pitches[pitchIndex].midi &&
+        pitch.spellingDirection === next.note.pitches[pitchIndex].spellingDirection)) {
       return undefined;
     }
 
-    const isTied = current.note.tieTo === next.note.id && next.note.tieFrom === current.note.id;
     if (!isTied && next.note.arpeggio) return undefined;
     if (!isTied && (current.note.tieTo !== undefined || next.note.tieFrom !== undefined)) return undefined;
     const updated = ScoreNotes.map(project, new Set([current.note.id, next.note.id]), (note) => {

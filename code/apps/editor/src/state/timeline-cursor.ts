@@ -8,6 +8,7 @@ import type { NoteTarget } from '../domain/score/note-target.ts';
 import NotePitches from '../domain/score/note-pitches.ts';
 import NoteExpressions from '../domain/score/note-expressions.ts';
 import PianoPitchRules from '../domain/score/piano-pitch-rules.ts';
+import PitchSpelling from '../domain/theory/pitch-spelling.ts';
 
 import VoiceCollision from "../domain/score/voice-collision.ts";
 
@@ -48,6 +49,8 @@ export type TimelineCursor={
   /** Normal input value, temporarily overridden by the active tuplet's fixed unit. */
   placementValue: NoteValue;
   pitch: number;
+  /** Transient movement direction to apply to the next cursor-entered pitch. */
+  spellingDirection?: 'up'|'down';
   focusedNoteId: string|null;
   /** Child of focusedNoteId; transient and independent of ordinary time selection. */
   focusedGraceId?: string|null;
@@ -280,8 +283,15 @@ export function isTimelinePlacementInvalid(outline: readonly OutlineBlock[],curs
 }
 
 export function addTimelineNoteAt(project:ScoreProject,cursor:TimelineCursor,position=cursor.positionSixteenths,pitch=cursor.pitch) {
- const result=NoteContinuation.place(project,{staff:cursor.staff,voiceIndex:cursor.voiceIndex},position,cursor.placementValue,pitch);
- return result&&{project:result.project,cursor:{...cursor,positionSixteenths:result.position,pitch,focusedNoteId:result.noteId!,focusedPitchIndex:0,selectionAnchorNoteId:null}};
+ const focusedPitch=cursor.focusedNoteId
+   ? ScoreTimeline.note(project.outline,cursor.focusedNoteId,cursor.staff)?.note.pitches[cursor.focusedPitchIndex??0]
+   : undefined;
+ const inputPitch=focusedPitch?.midi??pitch;
+ const spellingDirection=focusedPitch ? focusedPitch.spellingDirection : cursor.spellingDirection;
+ const result=NoteContinuation.place(project,{staff:cursor.staff,voiceIndex:cursor.voiceIndex},position,cursor.placementValue,inputPitch);
+ if(!result) return undefined;
+ const nextProject=spellingDirection ? NotePitches.setSpellingDirection(result.project,{ noteId:result.noteId!,staff:cursor.staff,pitchIndex:result.pitchIndex! },spellingDirection) : result.project;
+ return {project:nextProject,cursor:{...cursor,positionSixteenths:result.position,pitch:inputPitch,focusedNoteId:result.noteId!,focusedPitchIndex:0,selectionAnchorNoteId:null}};
 }
 function continueNote(project:ScoreProject,cursor:TimelineCursor,tied:boolean) {
  if(!cursor.focusedNoteId)return undefined;
@@ -372,9 +382,11 @@ export function transposeSelectedTimelineNotes(project: ScoreProject,cursor: Tim
   return { project: next,cursor: { ...cursor,focusedPitchIndex: null,pitch: focused.note.pitches[0].midi+direction } };
 }
 
-export function moveTimelineCursorPitch(cursor: TimelineCursor,direction: -1|1,keySignature?: KeySignature): TimelineCursor {
+export function moveTimelineCursorPitch(cursor: TimelineCursor,direction: -1|1,keySignature?: KeySignature,spellingKey: KeySignature={ fifths: 0 }): TimelineCursor {
   const pitch=PianoPitchRules.next(cursor.pitch,direction,keySignature);
-  return pitch===undefined? cursor:{ ...cursor,pitch };
+  if(pitch===undefined) return cursor;
+  return keySignature!==undefined ? { ...cursor,pitch,spellingDirection: undefined }
+    : { ...cursor,pitch,spellingDirection: PitchSpelling.directionForMove(pitch,spellingKey,direction===1?'up':'down') };
 }
 export function moveFocusedTimelineNotePitch(project: ScoreProject,cursor: TimelineCursor,direction: -1|1,keySignature?: KeySignature,octave=false) {
   if(!cursor.focusedNoteId||cursor.focusedPitchIndex===null) return undefined;
