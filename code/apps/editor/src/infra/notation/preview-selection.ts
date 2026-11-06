@@ -47,7 +47,7 @@ namespace PreviewSelection {
           else svg.style.removeProperty(property);
         }
       }
-      const color = selectedIds.length > 1 ? '#c62828' : '#2b8c46';
+      const color = selectedIds.length > 1 ? '#c62828' : '#1565c0';
       for (const id of selectedIds) for (const element of notes.get(id) ?? []) {
         for (const leaf of [element, ...element.querySelectorAll('path, rect, ellipse, polygon, line, use')]) {
           const svg = leaf as SVGElement, original = originals.get(svg);

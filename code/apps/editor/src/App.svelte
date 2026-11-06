@@ -39,6 +39,14 @@
   import type { ScorePassage as ScorePassageData } from './domain/score/score-passage.ts';
   import { invoke, isTauri } from '@tauri-apps/api/core';
   import { getCurrentWindow } from '@tauri-apps/api/window';
+  import McpBadge from './components/McpBadge.svelte';
+  import McpSessionController, { type McpSessionState } from './service/mcp/mcp-session-controller.ts';
+  import TauriMcp from './infra/tauri/mcp.ts';
+
+  let mcpState = $state<McpSessionState>({ status: 'stopped', details: null, error: null });
+  const mcp = isTauri() ? McpSessionController.create(TauriMcp, state => mcpState = state) : null;
+  onMount(() => { void mcp?.initialize(); });
+  onDestroy(() => { void mcp?.dispose().catch(error => console.error('Failed to stop MCP session:', error)); });
 
   let { notePreview = null, audioPreviewError = null }: {
     notePreview: NotePreview.Value | null;
@@ -402,6 +410,15 @@
   }
 
   function handleKeydown(event: KeyboardEvent) {
+    if (event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey && !event.isComposing && event.key.toLowerCase() === 'm') {
+      event.preventDefault();
+      if (!event.repeat) {
+        keyHold.reset();
+        if (mcp) void mcp.toggle();
+        else EditorDialogController.alert({ title: 'MCP Unavailable', messageLines: ['MCP sessions are available in the desktop app.'] });
+      }
+      return;
+    }
     if (EditorDialogController.controlKey(event)) return;
     if(noteSettings){
       event.preventDefault();
@@ -656,6 +673,7 @@
       {/if}
     </p>
     {#if audioPreviewError}<span class="audio-error" title={audioPreviewError}>Audio preview unavailable</span>{/if}
+    {#if mcp}<McpBadge state={mcpState} />{/if}
   </header>
 
   <main class="workspace" aria-label="Score editing workspace">

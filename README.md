@@ -5,6 +5,7 @@
 - [製品の思想・名前・アイコン](docs/product/clavierdesk.md)
 - [デスクトップエディターの起動手順](code/apps/editor/README.md)
 - [設計と移行計画](docs/plan/score-domain-model/refactoring-plan.md)
+- [MCP開発の引継ぎ資料](docs/plan/mcp/handoff.md)
 
 ## 配置
 
@@ -18,4 +19,4 @@ prototypes/
 docs/               思想・仕様・開発計画
 ```
 
-MCP・CLI等は将来code/apps配下へ追加します。Tauri化のMVPでは共通パッケージの切り出しを行いません。
+ローカルエージェント向けの[MCPサーバー](code/apps/mcp/README.md)はcode/apps/mcpにあります。デスクトップ版でCtrl＋Mを押すとセッション公開を切り替えられます。現在は検出・疎通確認のみ対応しています。

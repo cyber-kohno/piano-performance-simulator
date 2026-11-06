@@ -1,0 +1,14 @@
+[package]
+name = "clavierdesk-mcp"
+version = "0.1.0"
+description = "Local MCP adapter for ClavierDesk"
+edition = "2021"
+rust-version = "1.88"
+publish = false
+
+[dependencies]
+rmcp = { version = "3.4.0", features = ["server", "macros", "transport-io"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["io-std", "macros", "rt-multi-thread"] }
+

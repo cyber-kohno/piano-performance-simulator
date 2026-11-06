@@ -2,6 +2,7 @@
 **/dist/
 **/.vite/
 **/src-tauri/target/
+**/mcp/target/
 **/src-tauri/gen/
 temp/
 **/.pnpm-store/
