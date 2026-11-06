@@ -10,7 +10,8 @@ import ScoreTrill from "../../domain/score/score-trill.ts";
 import ScoreClef from "../../domain/score/score-clef.ts";
 import NoteExpressions from '../../domain/score/note-expressions.ts';
 import NotePitches from '../../domain/score/note-pitches.ts';
-import type { KeySignature, NoteValue, PianoFingering, PianoNote, ScoreProject, TrillSettings } from "../../domain/score/types.ts";
+import ScoreNotes from '../../domain/score/score-notes.ts';
+import type { GracePerformanceSettings, KeySignature, NoteValue, PianoFingering, PianoNote, ScoreProject, TrillSettings } from "../../domain/score/types.ts";
 import { type Clef } from "../../domain/score/score-clef.ts";
 import * as Timeline from '../../state/timeline-cursor.ts';
 import * as Grace from '../../state/grace-input.ts';
@@ -22,6 +23,7 @@ import ScorePassage, { type PassagePasteFailureReason, type ScorePassage as Scor
 
 export type NoteEditResult = { project: ScoreProject; cursor: Timeline.TimelineCursor };
 export type NoteSettings = Pick<PianoNote, 'staccato' | 'arpeggio'> & {
+  gracePerformance?: GracePerformanceSettings;
   trill?: TrillSettings;
   tempo?: { bpm: number | null };
   clef?: { value: Clef | null };
@@ -146,10 +148,11 @@ namespace NoteEditor {
     if (!id) return project;
     const selected = Timeline.getSelectedTimelineNotes(project.outline,cursor);
     const note = selected[0]?.note;
-    if (!note || selected.length !== 1 || Grace.getFocusedGrace(project.outline,cursor)) return project;
+    if (!note || selected.length !== 1) return project;
     const error = validateExpressionDraft({detail:null,row:0,draft:{
       ...(settings.staccato ? {staccato:{...settings.staccato}} : {}),
       ...(settings.arpeggio ? {arpeggio:{...settings.arpeggio}} : {}),
+      ...(settings.gracePerformance ? {grace:{...settings.gracePerformance}} : {}),
       ...(settings.trill ? {trill:{...settings.trill}} : {}),
     }},note);
     if (error || settings.trill && !ScoreTrill.canApply(project,id)) return project;
@@ -158,6 +161,10 @@ namespace NoteEditor {
     if (settings.clef && (!ScoreClef.anchors(project).some(anchor=>anchor.noteId===id) ||
       settings.clef.value !== null && !['treble','bass'].includes(settings.clef.value))) return project;
     let next = NoteExpressions.set(project,{noteId:id,staff:cursor.staff},settings);
+    next = ScoreNotes.map(next,new Set([id]), current => ({
+      ...current,
+      ...(settings.gracePerformance ? {gracePerformance:{...settings.gracePerformance}} : {}),
+    }),cursor.staff);
     next = ScoreTrill.set(next, id, settings.trill);
     if (settings.tempo) next = ScoreTempo.set(next, id, settings.tempo.bpm);
     if (settings.clef) next = ScoreClef.set(next, id, settings.clef.value);

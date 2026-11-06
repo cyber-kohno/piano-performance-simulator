@@ -39,6 +39,7 @@ namespace ScorePassage {
       pitches: note.pitches.map(pitch => ({ ...pitch })),
       ...(note.staccato ? { staccato: { ...note.staccato } } : {}),
       ...(note.arpeggio ? { arpeggio: { ...note.arpeggio } } : {}),
+      ...(note.gracePerformance ? { gracePerformance: { ...note.gracePerformance } } : {}),
       ...(note.beforeGraceNotes ? { beforeGraceNotes: note.beforeGraceNotes.map(grace => ({
         ...grace,
         value: { ...grace.value },
@@ -182,6 +183,7 @@ namespace ScorePassage {
         pitches: note.pitches.map(pitch => ({ ...pitch })),
         ...(note.staccato ? { staccato: { ...note.staccato } } : {}),
         ...(note.arpeggio ? { arpeggio: { ...note.arpeggio } } : {}),
+        ...(note.gracePerformance ? { gracePerformance: { ...note.gracePerformance } } : {}),
         ...(note.beforeGraceNotes?.length ? { beforeGraceNotes: note.beforeGraceNotes.map(grace => ({
           ...grace, id: `grace-${crypto.randomUUID()}`, value: { ...grace.value },
           pitches: grace.pitches.map(pitch => ({ ...pitch })),

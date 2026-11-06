@@ -3,6 +3,7 @@ import ScoreClock from './score-clock.ts';
 import StaccatoPerformance from './staccato-performance.ts';
 import TrillPerformance from './trill-performance.ts';
 import ArpeggioPerformance from './arpeggio-performance.ts';
+import GraceNotePerformance from './grace-note-performance.ts';
 import ScoreTrill from '../score/score-trill.ts';
 import ScoreArpeggio from '../score/score-arpeggio.ts';
 import ScoreKey from '../score/score-key.ts';
@@ -18,6 +19,7 @@ export type PlaybackEvent = {
   pitches: number[];
   /** Per-pitch lengths are used when a chord's pitches articulate differently. */
   pitchDurationsSeconds?: number[];
+  graceNote?: boolean;
   sourceNoteId: string;
 };
 export type PlaybackPedalEvent = { atSeconds: number; action: 'start' | 'change' | 'stop' };
@@ -73,19 +75,46 @@ namespace ScorePlaybackPlan {
           const performedEndSeconds = StaccatoPerformance.soundingEndSeconds(
             project, Math.min(noteEnd, endPosition), tailStart, last.lengthSixteenths, last.note.staccato,
           );
-          const effectiveStart = Math.max(noteStart, startPosition);
-          const effectiveStartSeconds = ScoreClock.secondsAt(project, effectiveStart);
-          if (performedEndSeconds <= effectiveStartSeconds) continue;
-          const noteEvents: PlaybackEvent[] = [];
+          const noteStartSeconds = ScoreClock.secondsAt(project, noteStart);
+          let principalStartSeconds = noteStartSeconds;
+          const graceEvents: PlaybackEvent[] = [];
+          if (first.note.beforeGraceNotes?.length && noteStart >= startPosition) {
+            const sixteenthSeconds = ScoreClock.secondsAt(project, noteStart + 1) - noteStartSeconds;
+            const attacks = GraceNotePerformance.attacks(first.note.beforeGraceNotes,
+              first.note.gracePerformance ?? GraceNotePerformance.defaults, sixteenthSeconds);
+            if (attacks.length) {
+              const earliest = Math.min(...attacks.map(attack => attack.offset));
+              const tail = attacks[attacks.length - 1];
+              // Keep the grace sequence before its principal note. When playback starts
+              // on this note, shift the complete group forward instead of scheduling pre-roll.
+              const preRollShift = startPosition <= noteStart
+                ? Math.max(0, startSeconds - (noteStartSeconds + earliest)) : 0;
+              principalStartSeconds += tail.offset + tail.duration + preRollShift;
+              attacks.forEach((attack, index) => {
+                const onset = noteStartSeconds + attack.offset + preRollShift;
+                const effectiveOnset = Math.max(onset, startSeconds);
+                const nextOnset = index + 1 < attacks.length
+                  ? noteStartSeconds + attacks[index + 1].offset + preRollShift
+                  : principalStartSeconds;
+                const duration = nextOnset - effectiveOnset;
+                if (duration <= 0) return;
+                graceEvents.push({ startSeconds: effectiveOnset - startSeconds, durationSeconds: duration,
+                  pitches: [attack.midi], sourceNoteId: `${first.note.id}-grace-${index}`, graceNote: true });
+              });
+            }
+          }
+          const effectiveStartSeconds = Math.max(principalStartSeconds, startSeconds);
+          if (performedEndSeconds <= effectiveStartSeconds && graceEvents.length === 0) continue;
+          const noteEvents: PlaybackEvent[] = [...graceEvents];
           const trill = ScoreTrill.forNote(project, first.note.id);
-          if (trill && trill.startNoteId === first.note.id && trill.endNoteId === last.note.id &&
+          if (performedEndSeconds > effectiveStartSeconds && trill && trill.startNoteId === first.note.id && trill.endNoteId === last.note.id &&
             ScoreTrill.canApply(project, first.note.id)) {
             const mainPitch = first.note.pitches[0].midi;
             const auxiliaryPitch = TrillPitch.above(mainPitch,
               ScoreKey.forNote(project.outline, first.note.id), trill.settings.auxiliary).midi;
-            const trillStartSeconds = ScoreClock.secondsAt(project, noteStart);
+            const trillStartSeconds = principalStartSeconds;
             const trillDurationSeconds = performedEndSeconds - trillStartSeconds;
-            const elapsedSeconds = Math.max(0, effectiveStartSeconds - trillStartSeconds);
+            const elapsedSeconds = Math.max(0, startSeconds - trillStartSeconds);
             const attacks = TrillPerformance.attacks(mainPitch, auxiliaryPitch, trill.settings, trillDurationSeconds);
             attacks.forEach((attack, index) => {
               const attackEnd = attack.offset + attack.duration;
@@ -95,24 +124,23 @@ namespace ScorePlaybackPlan {
                 durationSeconds: attackEnd - onset, pitches: [attack.midi],
                 sourceNoteId: `${first.note.id}-trill-${index}` });
             });
-          } else if (first.note.arpeggio && ScoreArpeggio.canApply(first.note)) {
+          } else if (performedEndSeconds > effectiveStartSeconds && first.note.arpeggio && ScoreArpeggio.canApply(first.note)) {
             const sixteenthSeconds = ScoreClock.secondsAt(project, noteStart + 1) - ScoreClock.secondsAt(project, noteStart);
             const attacks = ArpeggioPerformance.attacks(first.note.pitches, first.note.arpeggio, sixteenthSeconds);
-            const noteStartSeconds = ScoreClock.secondsAt(project, noteStart);
-            const earliestAttackSeconds = noteStartSeconds + Math.min(...attacks.map(attack => attack.offset));
+            const earliestAttackSeconds = principalStartSeconds + Math.min(...attacks.map(attack => attack.offset));
             // A transport cannot sound notes before its start. Preserve the roll by shifting
             // this arpeggio forward as a group when playback begins before its pre-roll.
             const preRollShift = startPosition <= noteStart
               ? Math.max(0, startSeconds - earliestAttackSeconds) : 0;
             attacks.forEach((attack, index) => {
-              const absoluteAttackSeconds = noteStartSeconds + attack.offset + preRollShift;
+              const absoluteAttackSeconds = principalStartSeconds + attack.offset + preRollShift;
               const effectiveAttackSeconds = Math.max(absoluteAttackSeconds, startSeconds);
               if (effectiveAttackSeconds >= performedEndSeconds) return;
               noteEvents.push({ startSeconds: effectiveAttackSeconds - startSeconds,
                 durationSeconds: performedEndSeconds - effectiveAttackSeconds, pitches: [attack.midi],
                 sourceNoteId: `${first.note.id}-arpeggio-${index}` });
             });
-          } else {
+          } else if (performedEndSeconds > effectiveStartSeconds) {
             const eventStart = effectiveStartSeconds - startSeconds;
             const eventEnd = performedEndSeconds - startSeconds;
             noteEvents.push({ startSeconds: eventStart, durationSeconds: eventEnd - eventStart,
@@ -147,6 +175,7 @@ namespace ScorePlaybackPlan {
       }
       const groupTailSeconds = group.endSeconds - startSeconds;
       for (const event of group.events) {
+        if (event.graceNote) continue;
         const eventEnd = event.startSeconds + event.durationSeconds;
         // For multi-attack ornaments, only the final attack reaches the note boundary.
         if (eventEnd < groupTailSeconds - 1e-7) continue;
@@ -168,7 +197,9 @@ namespace ScorePlaybackPlan {
     }
 
     events.sort((a, b) => a.startSeconds - b.startSeconds || a.sourceNoteId.localeCompare(b.sourceNoteId));
-    return { startPosition, endPosition, durationSeconds: Math.max(0, ScoreClock.secondsAt(project, endPosition) - startSeconds),
+    const scoreDuration = Math.max(0, ScoreClock.secondsAt(project, endPosition) - startSeconds);
+    const eventDuration = events.reduce((maximum, event) => Math.max(maximum, event.startSeconds + event.durationSeconds), 0);
+    return { startPosition, endPosition, durationSeconds: Math.max(scoreDuration, eventDuration),
       pedalInitiallyDown, pedalEvents, events };
   }
 }

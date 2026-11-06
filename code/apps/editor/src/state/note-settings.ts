@@ -7,7 +7,7 @@ import type { ScoreProject, PianoStaffName } from '../domain/score/types.ts';
 import { getSelectedTimelineNotes, type TimelineCursor } from './timeline-cursor.ts';
 import { getFocusedGrace } from './grace-input.ts';
 import { createChangesEditor, controlChangesEditor, type ChangesEditor } from './changes-editor.ts';
-import { createExpressionEditor, controlExpressionEditor, validateExpressionDraft, staccatoFromDraft, arpeggioFromDraft, trillFromDraft, type ExpressionEditor } from './expression-editor.ts';
+import { createExpressionEditor, controlExpressionEditor, validateExpressionDraft, staccatoFromDraft, arpeggioFromDraft, gracePerformanceFromDraft, trillFromDraft, type ExpressionEditor } from './expression-editor.ts';
 export type NoteSettingsState = {
   target: { noteId: string; measureNumber: number; staff: PianoStaffName; voice: number; trillNoteCount: number };
   expression: ExpressionEditor; changes: ChangesEditor; tab: 'expression' | 'changes';
@@ -16,8 +16,9 @@ export type NoteSettingsKey = { key: string; shiftKey: boolean; repeat: boolean;
 namespace NoteSettings {
   export function open(project: ScoreProject, cursor: TimelineCursor): NoteSettingsState | undefined {
     const selected = getSelectedTimelineNotes(project.outline, cursor);
-    if (getFocusedGrace(project.outline, cursor) || selected.length !== 1) return undefined;
-    const target = selected[0], position = MusicalTime.addNumbers(target.measureStartSixteenths, target.positionSixteenths);
+    const focusedGrace = getFocusedGrace(project.outline, cursor);
+    if (!focusedGrace && selected.length !== 1) return undefined;
+    const target = focusedGrace?.parent ?? selected[0], position = MusicalTime.addNumbers(target.measureStartSixteenths, target.positionSixteenths);
     return {      
 tab: 'expression',
       target: {        
@@ -31,7 +32,8 @@ noteId: target.note.id, staff: cursor.staff, voice: target.voiceIndex + 1, trill
   }
   function settings(editor: NoteSettingsState) {
     return {      
-staccato: staccatoFromDraft(editor.expression), arpeggio: arpeggioFromDraft(editor.expression), trill: trillFromDraft(editor.expression),
+staccato: staccatoFromDraft(editor.expression), arpeggio: arpeggioFromDraft(editor.expression),
+      gracePerformance: gracePerformanceFromDraft(editor.expression), trill: trillFromDraft(editor.expression),
       ...(editor.target.staff === 'upperStaff' && editor.target.voice === 1 ? { tempo: { bpm: editor.changes.tempo.bpm } } : {}),
       ...(editor.target.voice === 1 ? { clef: { value: editor.changes.clef } } : {})    
 };

@@ -156,6 +156,7 @@ namespace NoteDuration {
             note: {
               id,kind: 'note',value: { ...value },pitches: group.pitches.map((pitch) => ({ ...pitch })),
               ...(previous?.note.beforeGraceNotes?.length? { beforeGraceNotes: previous.note.beforeGraceNotes }:{}),
+              ...(previous?.note.gracePerformance? { gracePerformance: { ...previous.note.gracePerformance } }:{}),
               ...(previous?.note.arpeggio? { arpeggio: { ...previous.note.arpeggio } }:{}),
               ...(previous?.note.staccato? { staccato: { ...previous.note.staccato } }:{})
             },

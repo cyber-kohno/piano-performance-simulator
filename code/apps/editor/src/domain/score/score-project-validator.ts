@@ -30,6 +30,12 @@ function isNote(value: unknown): value is PianoNote {
     !['normal', 'down'].includes(String(value.arpeggio.type)) ||
     typeof value.arpeggio.spreadRatio !== 'number' || value.arpeggio.spreadRatio < 0.1 || value.arpeggio.spreadRatio > 1 ||
     typeof value.arpeggio.timing !== 'number' || value.arpeggio.timing < 0 || value.arpeggio.timing > 1)) return false;
+  if (value.gracePerformance !== undefined && (!isRecord(value.gracePerformance) ||
+    !Array.isArray(value.beforeGraceNotes) || value.beforeGraceNotes.length === 0 ||
+    typeof value.gracePerformance.spreadRatio !== 'number' || value.gracePerformance.spreadRatio < 0.1 ||
+    value.gracePerformance.spreadRatio > 1 || Math.abs(value.gracePerformance.spreadRatio * 10 - Math.round(value.gracePerformance.spreadRatio * 10)) > 1e-8 ||
+    typeof value.gracePerformance.timing !== 'number' || value.gracePerformance.timing < 0 || value.gracePerformance.timing > 1 ||
+    Math.abs(value.gracePerformance.timing * 10 - Math.round(value.gracePerformance.timing * 10)) > 1e-8)) return false;
   if (value.beforeGraceNotes !== undefined && (!Array.isArray(value.beforeGraceNotes) || !value.beforeGraceNotes.every(grace =>
     isRecord(grace) && isId(grace.id) && isNoteValue(grace.value) && typeof grace.slash === 'boolean' &&
     Array.isArray(grace.pitches) && grace.pitches.length === 1 && grace.pitches.every(pitch =>

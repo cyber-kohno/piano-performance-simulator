@@ -2,7 +2,8 @@
 import ScoreArpeggio from "../domain/score/score-arpeggio.ts";
 
 import ScoreTrill from "../domain/score/score-trill.ts";
-import type { ArpeggioSettings, PianoNote, StaccatoSettings, TrillSettings } from "../domain/score/types.ts";
+import GraceNotePerformance from "../domain/performance/grace-note-performance.ts";
+import type { ArpeggioSettings, GracePerformanceSettings, PianoNote, StaccatoSettings, TrillSettings } from "../domain/score/types.ts";
 
 type FieldValue = string | number | boolean;
 export type ExpressionValues = Record<string, FieldValue>;
@@ -17,6 +18,8 @@ export type ExpressionField = {
 export type ExpressionDefinition = {
   id: string; label: string; fields: ExpressionField[];
   available: (note: PianoNote, draft: ExpressionDraft) => boolean;
+  active?: (note: PianoNote, draft: ExpressionDraft) => boolean;
+  removable?: boolean;
   unavailableReason: (note: PianoNote, draft: ExpressionDraft) => string;
   create: () => ExpressionValues;
   afterChange?: (values: ExpressionValues, fieldId: string) => ExpressionValues;
@@ -45,6 +48,17 @@ export const expressionDefinitions: ExpressionDefinition[] = [{
     {id:'timing',label:'Timing',kind:'number',min:0,max:1,step:0.1},
   ],
 }, {
+  id:'grace', label:'Grace notes',
+  available:note => (note.beforeGraceNotes?.length ?? 0) > 0,
+  active:note => (note.beforeGraceNotes?.length ?? 0) > 0,
+  removable:false,
+  unavailableReason:() => 'Add grace notes on the timeline to edit their performance settings.',
+  create:() => ({...GraceNotePerformance.defaults}),
+  fields:[
+    {id:'spreadRatio',label:'Spread ratio',kind:'number',min:0.1,max:1,step:0.1},
+    {id:'timing',label:'Timing',kind:'number',min:0,max:1,step:0.1},
+  ],
+}, {
   id:'trill', label:'Trill',
   available:note=>note.pitches.length===1,
   unavailableReason:()=> 'Unavailable: Trill requires a single pitch throughout the tie chain.',
@@ -58,12 +72,13 @@ export const expressionDefinitions: ExpressionDefinition[] = [{
 export function createExpressionEditor(note: PianoNote, trill?: TrillSettings): ExpressionEditor {
   return { draft: { ...(note.staccato ? {staccato:{...note.staccato}} : {}),
     ...(note.arpeggio ? {arpeggio:{...note.arpeggio}} : {}),
+    ...(note.gracePerformance ? {grace:{...note.gracePerformance}} : {}),
     ...(trill ? {trill:{...trill}} : {}) }, detail: null, row: 0 };
 }
 export function getExpressionRows(editor: ExpressionEditor, note: PianoNote) {
   const definition = expressionDefinitions.find(item => item.id === editor.detail);
   if (!definition) return expressionDefinitions.map(item => ({ id:item.id, label:item.label,
-    value: editor.draft[item.id] ? 'On' : 'Off', disabled: !item.available(note,editor.draft), parent:true }));
+    value: (item.active?.(note,editor.draft) ?? !!editor.draft[item.id]) ? 'On' : 'Off', disabled: !item.available(note,editor.draft), parent:true }));
   const values = editor.draft[definition.id] ?? {};
   return definition.fields.map(field => ({ id:field.id, label:field.label,
     value: field.kind === 'choice' ? field.choices?.find(choice => choice.value === values[field.id])?.label ?? '—'
@@ -91,7 +106,7 @@ export function controlExpressionEditor(editor: ExpressionEditor, note: PianoNot
   const definition=expressionDefinitions.find(item=>item.id===(editor.detail ?? rows[editor.row]?.id));
   if (!definition || !definition.available(note,editor.draft)) return editor;
   if (!editor.detail) {
-    if (key === 'Delete') {
+    if (key === 'Delete' && definition.removable !== false) {
       const draft={...editor.draft};delete draft[definition.id];
       return { ...editor,draft,error:undefined };
     }
@@ -115,6 +130,8 @@ export function validateExpressionDraft(editor: ExpressionEditor, note: PianoNot
   const trill=trillFromDraft(editor);
   if(trill && (note.pitches.length!==1 || !ScoreTrill.validate(trill))) return 'Invalid or unavailable trill settings.';
   const arpeggio=arpeggioFromDraft(editor);
+  const grace=gracePerformanceFromDraft(editor);
+  if (grace && (!(note.beforeGraceNotes?.length) || !validateGracePerformance(grace))) return 'Invalid or unavailable grace-note settings.';
   if (arpeggio && editor.draft.staccato) return 'Staccato and Arpeggio cannot be used together.';
   if (arpeggio && (!ScoreArpeggio.canApply(note) || !ScoreArpeggio.validate(arpeggio))) return 'Invalid or unavailable arpeggio settings.';
   const values=editor.draft.staccato;
@@ -131,6 +148,16 @@ export function staccatoFromDraft(editor: ExpressionEditor): StaccatoSettings | 
 export function arpeggioFromDraft(editor: ExpressionEditor): ArpeggioSettings | undefined {
   const values=editor.draft.arpeggio;
   return values ? { type:values.type as ArpeggioSettings['type'], spreadRatio:values.spreadRatio as number, timing:values.timing as number } : undefined;
+}
+export function gracePerformanceFromDraft(editor: ExpressionEditor): GracePerformanceSettings | undefined {
+  const values=editor.draft.grace;
+  return values ? { spreadRatio:values.spreadRatio as number, timing:values.timing as number } : undefined;
+}
+function validateGracePerformance(value: GracePerformanceSettings): boolean {
+  return Number.isFinite(value.spreadRatio) && value.spreadRatio >= 0.1 && value.spreadRatio <= 1 &&
+    Math.abs(value.spreadRatio * 10 - Math.round(value.spreadRatio * 10)) < 1e-8 &&
+    Number.isFinite(value.timing) && value.timing >= 0 && value.timing <= 1 &&
+    Math.abs(value.timing * 10 - Math.round(value.timing * 10)) < 1e-8;
 }
 export function trillFromDraft(editor: ExpressionEditor): TrillSettings | undefined {
   const value=editor.draft.trill;

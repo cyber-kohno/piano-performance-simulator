@@ -62,7 +62,8 @@ namespace NoteContinuation {
 ...note, pitches: selected.note.pitches.map(pitch => ({ ...pitch })),
         ...(tied ? { tieFrom: selected.note.id } : {
           ...(selected.note.arpeggio ? { arpeggio: { ...selected.note.arpeggio } } : {}),
-          ...(selected.note.beforeGraceNotes?.length ? { beforeGraceNotes: selected.note.beforeGraceNotes.map(grace => ({ ...grace, id: 'grace-' + crypto.randomUUID(), value: { ...grace.value }, pitches: grace.pitches.map(pitch => ({ ...pitch })) })) } : {})
+          ...(selected.note.beforeGraceNotes?.length ? { beforeGraceNotes: selected.note.beforeGraceNotes.map(grace => ({ ...grace, id: 'grace-' + crypto.randomUUID(), value: { ...grace.value }, pitches: grace.pitches.map(pitch => ({ ...pitch })) })) } : {}),
+          ...(selected.note.gracePerformance ? { gracePerformance: { ...selected.note.gracePerformance } } : {})
         })      
 };
     }, target.staff);

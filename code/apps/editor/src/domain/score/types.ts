@@ -33,9 +33,18 @@ export type ArpeggioSettings = {
   timing: number;
 };
 
+export type GracePerformanceSettings = {
+  /** Total grace-note sequence window, measured as a fraction of a sixteenth note. */
+  spreadRatio: number;
+  /** 0 aligns the first grace attack; 1 aligns the last grace attack to the principal onset. */
+  timing: number;
+};
+
 export type PianoNote = {
   /** In performance order, immediately before this written note. */
   beforeGraceNotes?: PianoGraceNote[];
+  /** Performance settings for the grace-note group; its presence is derived from beforeGraceNotes. */
+  gracePerformance?: GracePerformanceSettings;
   /** Independent of future arpeggio and ornament settings. */
   staccato?: StaccatoSettings;
   arpeggio?: ArpeggioSettings;

@@ -43,7 +43,11 @@ namespace GraceNotes {
     if (!selected) return undefined;
     return ScoreNotes.map(project, new Set([target.noteId]), note => {
       const next = { ...note }, remaining = note.beforeGraceNotes!.filter(grace => grace.id !== graceId);
-      if (remaining.length) next.beforeGraceNotes = remaining; else delete next.beforeGraceNotes;
+      if (remaining.length) next.beforeGraceNotes = remaining;
+      else {
+        delete next.beforeGraceNotes;
+        delete next.gracePerformance;
+      }
       return next;
     }, target.staff);
   }
