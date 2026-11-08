@@ -41,10 +41,25 @@
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import McpBadge from './components/McpBadge.svelte';
   import McpSessionController, { type McpSessionState } from './service/mcp/mcp-session-controller.ts';
+  import McpEditorController from './service/mcp/mcp-editor-controller.ts';
   import TauriMcp from './infra/tauri/mcp.ts';
 
   let mcpState = $state<McpSessionState>({ status: 'stopped', details: null, error: null });
-  const mcp = isTauri() ? McpSessionController.create(TauriMcp, state => mcpState = state) : null;
+  let mcpCheckout = $state(false);
+  const mcpEditor = isTauri() ? McpEditorController.create({
+    getEditorState: () => ({ project, editor: { mode, outlineCursor: { ...outlineCursor }, timelineCursor: { ...timelineCursor },
+      selectedNoteIds: selectedTimelineNotes.map(entry => entry.note.id), pedalMode, pedalCursor: { ...pedalCursor },
+      ottavaMode, ottavaCursor: { ...ottavaCursor }, playbackActive: playback?.playing ?? false,
+      hasUncommittedDialogInput: noteSettings !== null || sectionTextInput !== null || fingeringTextInput !== null },
+      file: { dirty: projectIsDirty, name: currentProjectFile?.name ?? null } }),
+    getEditContext: () => ({ project, timelineCursor }),
+    updateProject: (previous, next) => { project = next; recordProjectChange(previous); },
+    checkoutChanged: state => {
+      mcpCheckout = state.active || state.completed;
+      if (state.completed) EditorDialogController.alert({ title: 'MCP Work Complete', messageLines: ['Review the changes. Close this dialog to unlock keyboard input.'], onClose: () => { mcpCheckout = false; mcp?.releaseCheckout(); } });
+    },
+  }) : null;
+  const mcp = isTauri() && mcpEditor ? McpSessionController.create(TauriMcp, state => mcpState = state, mcpEditor) : null;
   onMount(() => { void mcp?.initialize(); });
   onDestroy(() => { void mcp?.dispose().catch(error => console.error('Failed to stop MCP session:', error)); });
 
@@ -410,6 +425,7 @@
   }
 
   function handleKeydown(event: KeyboardEvent) {
+    if (mcpCheckout && !EditorDialogController.isOpen()) { event.preventDefault(); return; }
     if (event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey && !event.isComposing && event.key.toLowerCase() === 'm') {
       event.preventDefault();
       if (!event.repeat) {
@@ -656,6 +672,7 @@
 <svelte:window onkeydown={handleKeydown} onblur={closeMenu} />
 
 <div class="editor">
+  {#if mcpCheckout}<div class="mcp-checkout-blind" aria-hidden="true"></div>{/if}
   <header class="app-header">
     <h1>CLAVIER<span>DESK</span></h1>
     <div class="mode-labels" aria-label="Editing modes">
@@ -740,6 +757,8 @@
     background: #c5dcd9;
   }
 
+  .mcp-checkout-blind { position: fixed; z-index: 9000; inset: 0; background: rgb(90 190 115 / 10%); pointer-events: none; }
+
   h1 {
     flex: 0 0 auto;
     margin: 0;
@@ -756,6 +775,10 @@
     align-items: center;
     gap: 8px;
     font-size: 12px;
+  }
+
+  :global(.app-header .mcp-status) {
+    margin-left: 76px;
   }
 
   .mode-labels span {

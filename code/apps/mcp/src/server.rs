@@ -12,12 +12,30 @@ pub struct ClavierDeskMcpServer {
     #[allow(dead_code)]
     tool_router: ToolRouter<Self>,
 }
+fn checkout_params(session_id: &str) -> serde_json::Value {
+    json!({ "sessionId": session_id, "ownerId": std::process::id().to_string() })
+}
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 struct SessionRequest {
     #[schemars(description = "Complete sessionId returned by list_clavierdesk_sessions.")]
     session_id: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct ApplyEditRequest {
+    #[schemars(description = "Complete sessionId returned by list_clavierdesk_sessions.")]
+    session_id: String,
+    #[schemars(description = "Currently supported operation: set_pitch_fingering.")]
+    operation: String,
+    note_id: String,
+    staff: String,
+    pitch_index: usize,
+    fingering: u8,
+    #[serde(default)]
+    substitution_fingering: Option<u8>,
 }
 
 fn result(value: serde_json::Value) -> CallToolResult {
@@ -64,6 +82,79 @@ impl ClavierDeskMcpServer {
             )])),
         }
     }
+
+    #[tool(
+        description = "Begin an exclusive ClavierDesk edit checkout. The app locks keyboard input until finish_checkout is called and the user dismisses the completion notice."
+    )]
+    async fn begin_checkout(
+        &self,
+        Parameters(request): Parameters<SessionRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        match bridge::call_session(
+            &request.session_id,
+            "beginCheckout",
+            checkout_params(&request.session_id),
+        ) {
+            Ok(value) => Ok(result(value)),
+            Err(error) => Ok(CallToolResult::error(vec![ContentBlock::text(
+                json!({"code": error.code, "message": error.message}).to_string(),
+            )])),
+        }
+    }
+
+    #[tool(
+        description = "Finish the current ClavierDesk checkout. The app shows a completion notice and keeps keyboard input locked until the user dismisses it."
+    )]
+    async fn finish_checkout(
+        &self,
+        Parameters(request): Parameters<SessionRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        match bridge::call_session(
+            &request.session_id,
+            "finishCheckout",
+            checkout_params(&request.session_id),
+        ) {
+            Ok(value) => Ok(result(value)),
+            Err(error) => Ok(CallToolResult::error(vec![ContentBlock::text(
+                json!({"code": error.code, "message": error.message}).to_string(),
+            )])),
+        }
+    }
+
+    #[tool(
+        description = "Read the current unsaved ClavierDesk score and editor state. Requires an active checkout owned by this MCP process."
+    )]
+    async fn get_editor_state(
+        &self,
+        Parameters(request): Parameters<SessionRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        match bridge::call_session(
+            &request.session_id,
+            "getEditorState",
+            checkout_params(&request.session_id),
+        ) {
+            Ok(value) => Ok(result(value)),
+            Err(error) => Ok(CallToolResult::error(vec![ContentBlock::text(
+                json!({"code": error.code, "message": error.message}).to_string(),
+            )])),
+        }
+    }
+
+    #[tool(
+        description = "Apply a validated semantic edit to the unsaved score. Requires an active checkout owned by this MCP process. Supported operation: set_pitch_fingering, targeting a pitch by noteId, staff, and pitchIndex."
+    )]
+    async fn apply_edit(
+        &self,
+        Parameters(request): Parameters<ApplyEditRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        let params = json!({ "ownerId": std::process::id().to_string(), "operation": request.operation, "noteId": request.note_id, "staff": request.staff, "pitchIndex": request.pitch_index, "fingering": request.fingering, "substitutionFingering": request.substitution_fingering });
+        match bridge::call_session(&request.session_id, "applyEdit", params) {
+            Ok(value) => Ok(result(value)),
+            Err(error) => Ok(CallToolResult::error(vec![ContentBlock::text(
+                json!({"code": error.code, "message": error.message}).to_string(),
+            )])),
+        }
+    }
 }
 
 #[tool_handler]
@@ -74,7 +165,7 @@ impl ServerHandler for ClavierDeskMcpServer {
                 Implementation::new(env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"))
                     .with_title("ClavierDesk MCP"),
             )
-            .with_instructions("Use list_clavierdesk_sessions to discover sessions published with Ctrl+M in ClavierDesk. Match the complete sessionId to the ID shown in the app, then call probe_session with that ID. Always specify a session explicitly. This MVP provides connectivity only; no score or editor state is read or changed.".to_string())
+            .with_instructions("Use list_clavierdesk_sessions to discover sessions published with Ctrl+M in ClavierDesk. Match the complete sessionId to the ID shown in the app and pass it to every session tool. Call begin_checkout before reading editor state. get_editor_state returns the current unsaved score and editor context for the checkout owner. Call finish_checkout when the work is complete; the app remains keyboard-locked until the user dismisses the completion dialog.".to_string())
     }
 }
 
@@ -88,6 +179,10 @@ mod tests {
         assert!(router.has_route("ping"));
         assert!(router.has_route("list_clavierdesk_sessions"));
         assert!(router.has_route("probe_session"));
-        assert_eq!(router.list_all().len(), 3);
+        assert!(router.has_route("begin_checkout"));
+        assert!(router.has_route("finish_checkout"));
+        assert!(router.has_route("get_editor_state"));
+        assert!(router.has_route("apply_edit"));
+        assert_eq!(router.list_all().len(), 7);
     }
 }

@@ -10,6 +10,7 @@ export type McpSessionState = {
   details: McpSessionDetails | null;
   error: string | null;
 };
+export type McpCheckoutState = { active: boolean; completed: boolean };
 export type McpSessionPort = {
   startSession(): Promise<McpSessionDetails>;
   stopSession(): Promise<void>;
@@ -17,9 +18,10 @@ export type McpSessionPort = {
   onRequest(handler: (request: McpBridgeRequest) => void): Promise<() => void>;
   respond(response: McpBridgeResponse): Promise<void>;
 };
+export type McpRequestHandler = { handle(request: McpBridgeRequest): McpBridgeResponse; releaseCheckout(): void };
 
 namespace McpSessionController {
-  export function create(port: McpSessionPort, update: (state: McpSessionState) => void) {
+export function create(port: McpSessionPort, update: (state: McpSessionState) => void, editor: McpRequestHandler) {
     let state: McpSessionState = { status: 'stopped', details: null, error: null };
     let unlisten: (() => void) | undefined;
     let disposed = false;
@@ -48,9 +50,7 @@ namespace McpSessionController {
         if (disposed) return;
         if (!unlisten) unlisten = await port.onRequest(request => {
           if (disposed) return;
-          const response: McpBridgeResponse = request.method === 'ping'
-            ? { id: request.id, result: { application: 'ClavierDesk', status: 'ok' } }
-            : { id: request.id, error: { code: 'UNKNOWN_METHOD', message: 'This MCP method is not supported.' } };
+          const response = editor.handle(request);
           void port.respond(response).catch(error => console.error('Failed to respond to MCP request:', error));
         });
         if (disposed) return;
@@ -79,6 +79,7 @@ namespace McpSessionController {
         try { await operation; } finally { operation = undefined; }
       },
       toggle,
+      releaseCheckout() { editor.releaseCheckout(); },
       async dispose() {
         disposed = true;
         await operation;

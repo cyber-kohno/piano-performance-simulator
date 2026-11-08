@@ -1,5 +1,4 @@
 
-import MusicalTime from "../theory/musical-time.ts";
 import ScoreVoice from "./score-voice.ts";
 import type { OutlineBlock, PianoStaffName, PianoNote, PianoTuplet, MeasureBlock } from './types.ts';
 
@@ -24,7 +23,8 @@ namespace ScoreTimeline {
     for (const block of outline) {
       if (block.type !== 'measure') continue;
       const lengthSixteenths = block.data.length.cnt / block.data.length.unit * 16;
-      if (MusicalTime.compareNumbers(position, startSixteenths) >= 0 && MusicalTime.compareNumbers(position, startSixteenths + lengthSixteenths) < 0) {
+      // Playback positions are approximate decimals from the transport's binary search.
+      if (position >= startSixteenths && position < startSixteenths + lengthSixteenths) {
         return { measure: block, startSixteenths, lengthSixteenths };
       }
       startSixteenths += lengthSixteenths;
