@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onDestroy } from 'svelte';
   import ScoreSlur from "../domain/score/score-slur.ts";
 
   import ScoreTrill from "../domain/score/score-trill.ts";
@@ -7,8 +8,6 @@
   import WrittenValue from "../domain/theory/written-value.ts";
   import TimelineView from '../state/timeline-view.ts';
   import ScoreKey from "../domain/score/score-key.ts";
-
-  import { onDestroy } from 'svelte';
 
   import { getFocusedGrace, getGraceRollLayout } from '../state/grace-input';
   import type { PedalCursor } from '../state/pedal';
@@ -52,34 +51,53 @@
   let pianoRollViewport = $state<HTMLElement>();
   let pitchScrollViewport = $state<HTMLDivElement>();
   let pedalViewport = $state<HTMLElement>();
+  let timelineScrollLeft = $state(0);
+  let timelineScrollTop = $state(0);
+  let timelineViewportWidth = $state(0);
+  let timelineViewportHeight = $state(0);
+  let scrollTimers: number[] = [];
+  let verticalScrollTimers: number[] = [];
   const pedalEvents = $derived(ScorePedal.events({ outline }));
   const pedalSpans = $derived(ScorePedal.spans({ outline }, { splitAtChanges: true }));
   const pedalChangePositions = $derived(new Set(pedalEvents.filter(event => event.action === 'change').map(event => event.position)));
   const ottavaEvents = $derived(ScoreOttava.events({ outline }, timelineCursor.staff));
   const ottavaSpans = $derived(ScoreOttava.spans({ outline }, timelineCursor.staff));
-  function syncPedalScroll() {
-    if (pedalViewport && pianoRollViewport) pedalViewport.scrollLeft = pianoRollViewport.scrollLeft;
+  function syncTimelineScroll() {
+    const roll = pianoRollViewport;
+    if (!roll) return;
+    const left = roll.scrollLeft;
+    const top = roll.scrollTop;
+    if (measureRow && Math.abs(measureRow.scrollLeft - left) > 1) measureRow.scrollLeft = left;
+    if (pedalViewport && Math.abs(pedalViewport.scrollLeft - left) > 1) pedalViewport.scrollLeft = left;
+    if (pitchScrollViewport && Math.abs(pitchScrollViewport.scrollTop - top) > 1) pitchScrollViewport.scrollTop = top;
+    timelineScrollLeft = left;
+    timelineScrollTop = top;
+    timelineViewportWidth = roll.clientWidth;
+    timelineViewportHeight = roll.clientHeight;
   }
-  $effect(() => { if (pedalViewport) syncPedalScroll(); });
-  let scrollTimers: number[] = [];
-  let verticalScrollTimers: number[] = [];
+  $effect(() => {
+    const roll = pianoRollViewport;
+    if (!roll) return;
+    const observer = new ResizeObserver(syncTimelineScroll);
+    observer.observe(roll);
+    syncTimelineScroll();
+    return () => observer.disconnect();
+  });
 
   function animateTimelineScroll(left: number) {
     const header = measureRow;
     const roll = pianoRollViewport;
     if (!header || !roll) return;
-
     for (const timer of scrollTimers) window.clearTimeout(timer);
     scrollTimers = [];
-
     const divisionCount = 15;
     const step = (left - roll.scrollLeft) / divisionCount;
     for (let division = 0; division < divisionCount; division += 1) {
       const isTail = division === divisionCount - 1;
       const timer = window.setTimeout(() => {
         roll.scrollLeft += step;
-        if (isTail) header.scrollLeft = roll.scrollLeft;
-        else header.scrollLeft += step;
+        timelineScrollLeft = roll.scrollLeft;
+        if (isTail || Math.abs(header.scrollLeft - roll.scrollLeft) > 1) header.scrollLeft = roll.scrollLeft;
       }, division * 10);
       scrollTimers.push(timer);
     }
@@ -89,10 +107,8 @@
     const roll = pianoRollViewport;
     const pitch = pitchScrollViewport;
     if (!roll || !pitch) return;
-
     for (const timer of verticalScrollTimers) window.clearTimeout(timer);
     verticalScrollTimers = [];
-
     const divisionCount = 15;
     const rollStep = (rollTop - roll.scrollTop) / divisionCount;
     const pitchStep = (pitchTop - pitch.scrollTop) / divisionCount;
@@ -145,14 +161,14 @@
   const locatedNotes = $derived(ScoreTimeline.notes(outline, timelineCursor.staff, timelineCursor.voiceIndex));
   const selectedNotes = $derived(getSelectedTimelineNotes(outline, timelineCursor));
   const selectedNoteIds = $derived(new Set(selectedNotes.map(({ note }) => note.id)));
-  const measureNotes=$derived(TimelineView.notes(outline,independentNoteGapPixels,pixelsPerSixteenth));
+  const notesWithVisualGap = $derived(TimelineView.visualGaps(outline));
   const focusedNote = $derived(locatedNotes.find(({ note }) => note.id === timelineCursor.focusedNoteId));
   const slurPaths = $derived(ScoreSlur.ranges({ outline, slurs }).map(span => {
     const x1 = (span.first.start + 0.25) * pixelsPerSixteenth;
     const x2 = (span.last.start + 0.25) * pixelsPerSixteenth;
     const highest = Math.max(...span.members.flatMap(entry => entry.note.pitches.map(pitch => pitch.midi)));
     const y = pitchTopMargin + (108 - highest) * pitchRowHeight - 8;
-    return { id: span.id, active: !pedalMode && span.first.staff === timelineCursor.staff && span.first.voiceIndex === timelineCursor.voiceIndex,
+    return { id: span.id, x1, x2, active: !pedalMode && span.first.staff === timelineCursor.staff && span.first.voiceIndex === timelineCursor.voiceIndex,
       path: `M ${x1} ${y} Q ${(x1 + x2) / 2} ${y - 28} ${x2} ${y}` };
   }));
   const focusedGrace = $derived(getFocusedGrace(outline, timelineCursor));
@@ -172,7 +188,7 @@
       const x2 = (next.measureStartSixteenths + next.positionSixteenths + next.lengthSixteenths / 2) * pixelsPerSixteenth;
       return note.pitches.map((pitch) => {
         const y = pitchTopMargin + (108 - pitch.midi) * pitchRowHeight + pitchRowHeight / 2;
-        return { id: `${note.id}-${next.note.id}-${pitch.midi}`, path: `M ${x1} ${y} Q ${(x1 + x2) / 2} ${y + pitchRowHeight} ${x2} ${y}` };
+        return { id: `${note.id}-${next.note.id}-${pitch.midi}`, x1, x2, path: `M ${x1} ${y} Q ${(x1 + x2) / 2} ${y + pitchRowHeight} ${x2} ${y}` };
       });
     });
   });
@@ -189,7 +205,45 @@
     }
     return null;
   });
-  const headerMeasures=$derived(TimelineView.header(outline,pixelsPerWhole));
+  const headerMeasures = $derived(TimelineView.layout(outline, pixelsPerWhole));
+  const totalTimelineWidth = $derived(headerMeasures.length
+    ? headerMeasures.at(-1)!.start + headerMeasures.at(-1)!.width : 0);
+  const requiredMeasureIndices = $derived(statusMeasureNumber === null ? [] : [statusMeasureNumber - 1]);
+  const visibleMeasureIndices = $derived(TimelineView.visibleMeasureIndices(
+    headerMeasures, timelineScrollLeft, Math.max(1, timelineViewportWidth || 960),
+    Math.max(480, timelineViewportWidth), requiredMeasureIndices,
+  ));
+  const visiblePitchBounds = $derived.by(() => {
+    const viewportHeight = timelineViewportHeight || 720;
+    return {
+      min: Math.min(108, Math.max(21, 108 - Math.ceil((timelineScrollTop + viewportHeight - pitchTopMargin) / pitchRowHeight) - 1)),
+      max: Math.max(21, Math.min(108, 108 - Math.floor((timelineScrollTop - pitchTopMargin) / pitchRowHeight) + 1)),
+    };
+  });
+  const visibleMeasures = $derived.by(() => visibleMeasureIndices.map(index => {
+    const measure = measures[index];
+    const layout = headerMeasures[index];
+    const notes = TimelineView.notesForMeasure(measure, notesWithVisualGap, independentNoteGapPixels, pixelsPerSixteenth)
+      .filter(entry => entry.note.pitches.some(pitch => pitch.midi >= visiblePitchBounds.min && pitch.midi <= visiblePitchBounds.max) ||
+        (entry.note.beforeGraceNotes ?? []).some(grace => grace.pitches.some(pitch => pitch.midi >= visiblePitchBounds.min && pitch.midi <= visiblePitchBounds.max)));
+    return { index, measure, layout, notes, ticks: TimelineView.ticks(layout, outline[0].data.timeSignature, pixelsPerWhole) };
+  }));
+  const visibleTimelineStart = $derived(Math.max(0, timelineScrollLeft - Math.max(480, timelineViewportWidth)));
+  const visibleTimelineEnd = $derived(timelineScrollLeft + Math.max(1, timelineViewportWidth || 960) + Math.max(480, timelineViewportWidth));
+  const visibleTiePaths = $derived(tiePaths.filter(path => path.x2 >= visibleTimelineStart && path.x1 <= visibleTimelineEnd));
+  const visibleSlurPaths = $derived(slurPaths.filter(path => path.x2 >= visibleTimelineStart && path.x1 <= visibleTimelineEnd));
+  const visiblePedalEvents = $derived(pedalEvents.filter(event => {
+    const x = event.position * pixelsPerSixteenth;
+    return x >= visibleTimelineStart && x <= visibleTimelineEnd;
+  }));
+  const visiblePedalSpans = $derived(pedalSpans.filter(span =>
+    span.end * pixelsPerSixteenth >= visibleTimelineStart && span.start * pixelsPerSixteenth <= visibleTimelineEnd));
+  const visibleOttavaEvents = $derived(ottavaEvents.filter(event => {
+    const x = event.position * pixelsPerSixteenth;
+    return x >= visibleTimelineStart && x <= visibleTimelineEnd;
+  }));
+  const visibleOttavaSpans = $derived(ottavaSpans.filter(span =>
+    span.end * pixelsPerSixteenth >= visibleTimelineStart && span.start * pixelsPerSixteenth <= visibleTimelineEnd));
   $effect(() => {
     const selectedBlockId = cursor.blockId;
     const isTimelineMode = mode === 'timeline';
@@ -224,11 +278,7 @@
 
     const viewportWidth = Math.min(header.clientWidth, roll.clientWidth);
     const maxScrollLeft = Math.max(0, totalWidth + viewportWidth / 2 - viewportWidth);
-    const scrollLeft = Math.max(
-      0,
-      Math.min(maxScrollLeft, focusPosition - viewportWidth / 2),
-    );
-
+    const scrollLeft = Math.max(0, Math.min(maxScrollLeft, focusPosition - viewportWidth / 2));
     animateTimelineScroll(scrollLeft);
   });
   $effect(() => {
@@ -236,22 +286,28 @@
 
     const pitchIndex = 108 - timelineCursor.pitch;
     const pitchRowCenter = pitchIndex * pitchRowHeight + pitchRowHeight / 2;
-    const rollTop = Math.max(
-      0,
-      Math.min(
-        pianoRollViewport.scrollHeight - pianoRollViewport.clientHeight,
-        pitchTopMargin + pitchRowCenter - pianoRollViewport.clientHeight / 2,
-      ),
-    );
-    const pitchTop = Math.max(
-      0,
-      Math.min(
-        pitchScrollViewport.scrollHeight - pitchScrollViewport.clientHeight,
-        pitchTopMargin + pitchRowCenter - pitchScrollViewport.clientHeight / 2,
-      ),
-    );
+    const rollTop = Math.max(0, Math.min(
+      pianoRollViewport.scrollHeight - pianoRollViewport.clientHeight,
+      pitchTopMargin + pitchRowCenter - pianoRollViewport.clientHeight / 2,
+    ));
+    const pitchTop = Math.max(0, Math.min(
+      pitchScrollViewport.scrollHeight - pitchScrollViewport.clientHeight,
+      pitchTopMargin + pitchRowCenter - pitchScrollViewport.clientHeight / 2,
+    ));
     animateTimelineVerticalScroll(rollTop, pitchTop);
   });
+
+  function pitchLaneBackground(measureId: string) {
+    const pitchClasses = measureKeyCache.get(measureId)?.pitchClasses;
+    const stops: string[] = [];
+    for (let index = 0; index < 12; index += 1) {
+      const midi = 108 - index;
+      const color = pitchClasses?.has(((midi % 12) + 12) % 12) ? '#f2f2f2' : '#e4e4e4';
+      const top = index * 24;
+      stops.push(`${color} ${top}px`, `${color} ${top + 23}px`, `#d2d9cb ${top + 23}px`, `#d2d9cb ${top + 24}px`);
+    }
+    return `repeating-linear-gradient(to bottom, ${stops.join(', ')})`;
+  }
   const pitches = $derived.by(() => {
 
     return Array.from({ length: 88 }, (_, index) => {
@@ -273,16 +329,19 @@
   <section class="time-header" aria-label="Time header">
     <div class="event-row" aria-label="Event row"></div>
     <div class="measure-row" aria-label="Measure row" bind:this={measureRow}>
-      {#each headerMeasures as measure (measure.id)}
+      <div class="measure-row-spacer" style={`width: ${totalTimelineWidth}px`}></div>
+      {#each visibleMeasures as item (item.measure.id)}
+        {@const measure = item.measure}
         <div
           class="measure-header-block"
+          class:first-measure={item.layout.number === 1}
           class:focused={cursor.blockId === measure.id}
           aria-current={cursor.blockId === measure.id ? 'true' : undefined}
-          style={`width: ${measure.width}px`}
+          style={`left: ${item.layout.start}px; width: ${item.layout.width}px`}
         >
           <div class="measure-start" aria-hidden="true"></div>
-          <span class="measure-number">{measure.number}</span>
-          {#each measure.ticks as tick (tick.position)}
+          <span class="measure-number">{item.layout.number}</span>
+          {#each item.ticks as tick (tick.position)}
             {#if tick.position > 0}
               <div
                 class="beat-tick"
@@ -314,8 +373,9 @@
       <div class="pitch-margin bottom" aria-hidden="true"></div>
     </div>
   </section>
-  <section class="piano-roll" aria-label="Piano roll" bind:this={pianoRollViewport} onscroll={syncPedalScroll}>
+  <section class="piano-roll" aria-label="Piano roll" bind:this={pianoRollViewport} onscroll={syncTimelineScroll}>
     <div class="measure-track" class:playback-active={playbackPosition !== null} aria-label="Measure timeline">
+      <div class="measure-track-spacer" style={`width: ${totalTimelineWidth}px`}></div>
       {#if playbackPosition !== null}
         <PlaybackPosition position={playbackPosition} {pixelsPerSixteenth} />
       {/if}
@@ -360,25 +420,20 @@
           aria-hidden="true"
         ></div>
       {/if}
-      {#each measures as measure, index (measure.id)}
+      {#each visibleMeasures as item (item.measure.id)}
+        {@const measure = item.measure}
+        {@const index = item.index}
         <div
           class="measure-region"
           class:focused={mode !== 'timeline' && cursor.blockId === measure.id}
           aria-label={`Measure ${index + 1} timeline region`}
           aria-current={cursor.blockId === measure.id ? 'true' : undefined}
-          style={`width: ${(measure.data.length.cnt / measure.data.length.unit) * pixelsPerWhole}px`}
+          style={`left: ${item.layout.start}px; width: ${item.layout.width}px`}
         >
           <div class="pitch-margin top" aria-hidden="true"></div>
-          {#each pitches as pitch (pitch.midi)}
-            <div
-              class="pitch-lane"
-              class:diatonic={ScoreKey.contains(measureKeyCache, measure.id, pitch.midi)}
-              class:chromatic={!ScoreKey.contains(measureKeyCache, measure.id, pitch.midi)}
-              aria-hidden="true"
-            ></div>
-          {/each}
+          <div class="pitch-lanes" style={`background-image: ${pitchLaneBackground(measure.id)}`} aria-hidden="true"></div>
           <div class="pitch-margin bottom" aria-hidden="true"></div>
-          {#each headerMeasures[index].ticks as tick (tick.position)}
+          {#each item.ticks as tick (tick.position)}
             <div
               class="roll-gridline"
               class:bar={tick.kind === 'bar'}
@@ -389,7 +444,7 @@
               aria-hidden="true"
             ></div>
           {/each}
-          {#each measureNotes[index] as entry (entry.note.id)}
+          {#each item.notes as entry (entry.note.id)}
             {@const note = entry.note}
             {#if trillNotes.has(note.id)}
               <div class="trill-mark" role="img" aria-label="Trill"
@@ -475,16 +530,16 @@
           {/if}
         </div>
       {/each}
-      {#if mode === 'timeline' && tiePaths.length > 0}
+      {#if mode === 'timeline' && visibleTiePaths.length > 0}
         <svg class="tie-links" width="100%" height="100%" aria-hidden="true">
-          {#each tiePaths as tie (tie.id)}
+          {#each visibleTiePaths as tie (tie.id)}
             <path d={tie.path}></path>
           {/each}
         </svg>
       {/if}
-      {#if mode === 'timeline' && slurPaths.length > 0}
+      {#if mode === 'timeline' && visibleSlurPaths.length > 0}
         <svg class="tie-links slur-links" width="100%" height="100%" aria-label="Slurs" role="img">
-          {#each slurPaths as slur (slur.id)}<path d={slur.path} class:inactive={!slur.active}></path>{/each}
+          {#each visibleSlurPaths as slur (slur.id)}<path d={slur.path} class:inactive={!slur.active}></path>{/each}
         </svg>
       {/if}
     </div>
@@ -494,10 +549,11 @@
     <section class="pedal-lane" aria-label="Pedal editing lane" bind:this={pedalViewport}>
       <div class="pedal-track">
         <div class="pedal-ruler">
-          {#each headerMeasures as measure (measure.id)}
-            <div class="pedal-measure" style={`width: ${measure.width}px`}>
-              <span>{measure.number}</span>
-              {#each measure.ticks as tick (tick.position)}
+          <div class="pedal-ruler-spacer" style={`width: ${totalTimelineWidth}px`}></div>
+          {#each visibleMeasures as item (item.measure.id)}
+            <div class="pedal-measure" style={`left: ${item.layout.start}px; width: ${item.layout.width}px`}>
+              <span>{item.layout.number}</span>
+              {#each item.ticks as tick (tick.position)}
                 <i class:major={tick.kind === 'bar' || tick.kind === 'beat'} style={`left: ${tick.position}px`}></i>
               {/each}
             </div>
@@ -507,12 +563,12 @@
           <div class="pedal-unit-range" aria-hidden="true"
             style={`left: ${pedalCursor.position * pixelsPerSixteenth}px; width: ${WrittenValue.sixteenths(pedalCursor.value) * pixelsPerSixteenth}px`}></div>
         {/if}
-        {#each pedalSpans as span (span.start)}
+        {#each visiblePedalSpans as span (span.start)}
           {@const startInset = pedalChangePositions.has(span.start) ? 2 : 0}
           {@const endInset = pedalChangePositions.has(span.end) ? 2 : 0}
           <div class="pedal-span" style={`left: ${span.start * pixelsPerSixteenth + startInset}px; width: ${Math.max(0, (span.end - span.start) * pixelsPerSixteenth - startInset - endInset)}px`}></div>
         {/each}
-        {#each pedalEvents as event (event.id)}
+        {#each visiblePedalEvents as event (event.id)}
           <span class="pedal-event" class:release={event.action === 'stop'} class:retake={event.action === 'change'}
             role="img"
             aria-label={`Pedal ${event.action} at ${event.position}`}
@@ -531,22 +587,23 @@
     <section class="pedal-lane ottava-lane" aria-label={`${timelineCursor.staff === 'upperStaff' ? 'Upper staff 8va' : 'Lower staff 8vb'} editing lane`} bind:this={pedalViewport}>
       <div class="pedal-track">
         <div class="pedal-ruler">
-          {#each headerMeasures as measure (measure.id)}
-            <div class="pedal-measure" style={`width: ${measure.width}px`}>
-              <span>{measure.number}</span>
-              {#each measure.ticks as tick (tick.position)}<i class:major={tick.kind === 'bar' || tick.kind === 'beat'} style={`left: ${tick.position}px`}></i>{/each}
+          <div class="pedal-ruler-spacer" style={`width: ${totalTimelineWidth}px`}></div>
+          {#each visibleMeasures as item (item.measure.id)}
+            <div class="pedal-measure" style={`left: ${item.layout.start}px; width: ${item.layout.width}px`}>
+              <span>{item.layout.number}</span>
+              {#each item.ticks as tick (tick.position)}<i class:major={tick.kind === 'bar' || tick.kind === 'beat'} style={`left: ${tick.position}px`}></i>{/each}
             </div>
           {/each}
         </div>
         {#if playbackPosition === null}
           <div class="pedal-unit-range" aria-hidden="true" style={`left: ${ottavaCursor.position * pixelsPerSixteenth}px; width: ${WrittenValue.sixteenths(ottavaCursor.value) * pixelsPerSixteenth}px`}></div>
         {/if}
-        {#each ottavaSpans as span (`${span.start}-${span.end}`)}
+        {#each visibleOttavaSpans as span (`${span.start}-${span.end}`)}
           <div class="ottava-span" style={`left: ${span.start * pixelsPerSixteenth}px; width: ${Math.max(0, (span.end - span.start) * pixelsPerSixteenth)}px`}>
             <span>{timelineCursor.staff === 'upperStaff' ? '8va' : '8vb'}</span>
           </div>
         {/each}
-        {#each ottavaEvents as event (event.id)}
+        {#each visibleOttavaEvents as event (event.id)}
           <span class="pedal-event" class:release={event.action === 'stop'} role="img" aria-label={`Ottava ${event.action} at ${event.position}`} style={`left: ${event.position * pixelsPerSixteenth}px`}></span>
         {/each}
         {#if playbackPosition === null}
@@ -605,8 +662,9 @@
   .ottava-label { display: flex; flex-direction: column; justify-content: center; gap: 3px; line-height: 1.15; }
   .pedal-lane { grid-row: 3; grid-column: 2; overflow: hidden; background: #e0eded; border-top: 1px solid #829fa2; min-width: 0; container-type: inline-size; }
   .pedal-track { position: relative; width: max-content; min-width: 100%; height: 64px; padding-right: 50cqw; }
-  .pedal-ruler { display: flex; height: 20px; }
-  .pedal-measure { position: relative; flex-shrink: 0; font-size: 10px; }
+  .pedal-ruler { position: relative; display: block; height: 20px; }
+  .pedal-ruler-spacer { height: 1px; }
+  .pedal-measure { position: absolute; top: 0; height: 20px; font-size: 10px; }
   .pedal-measure span { position: absolute; left: 3px; top: 0; }
   .pedal-measure i { position: absolute; bottom: 0; height: 5px; width: 1px; background: #91acaf; }
   .pedal-measure i.major { height: 10px; background: #617e81; }
@@ -639,6 +697,7 @@
   }
 
   .measure-row {
+    position: relative;
     display: flex;
     min-width: 0;
     overflow: hidden;
@@ -650,8 +709,11 @@
     content: '';
   }
 
+  .measure-row-spacer { height: 1px; flex: 0 0 auto; }
+
   .measure-header-block {
-    position: relative;
+    position: absolute;
+    top: 0;
     flex: 0 0 auto;
     height: 40px;
   }
@@ -681,11 +743,11 @@
     font-variant-numeric: tabular-nums;
   }
 
-  .measure-header-block:first-child .measure-start {
+  .measure-header-block.first-measure .measure-start {
     left: 4px;
   }
 
-  .measure-header-block:first-child .measure-number {
+  .measure-header-block.first-measure .measure-number {
     left: 5.5px;
   }
 
@@ -855,6 +917,11 @@
     background: #edf0df;
   }
 
+  .measure-track-spacer {
+    flex: 0 0 auto;
+    height: calc(var(--pitch-top-margin) + 2112px + var(--pitch-bottom-margin));
+  }
+
   .measure-track.playback-active::before {
     position: absolute;
     z-index: 3;
@@ -955,10 +1022,12 @@
   }
 
   .measure-region {
-    position: relative;
+    position: absolute;
+    top: 0;
     display: flex;
     flex-direction: column;
     flex: 0 0 auto;
+    height: 100%;
   }
 
   .missing-voice-blind {
@@ -970,18 +1039,11 @@
     pointer-events: none;
   }
 
-  .pitch-lane {
-    flex: 0 0 var(--pitch-row-height);
-    height: var(--pitch-row-height);
-    border-bottom: 1px solid #d2d9cb;
-  }
-
-  .pitch-lane.diatonic {
-    background: #f2f2f2;
-  }
-
-  .pitch-lane.chromatic {
-    background: #e4e4e4;
+  .pitch-lanes {
+    flex: 0 0 2112px;
+    height: 2112px;
+    background-repeat: repeat-y;
+    background-size: 100% 288px;
   }
 
   .score-note-pitch {

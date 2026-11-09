@@ -4,13 +4,14 @@
 
 接続基盤については[MCP開発の引継ぎ資料](../../../docs/plan/mcp/handoff.md)、現在の編集・排他仕様については[チェックアウトとUI入力](../../../docs/plan/mcp/checkout-and-ui.md)を参照してください。
 
-次段階は、空からまとまった譜面を構築してGUIで確認するMVPです。[要件・設計方針・別環境への引継ぎ](../../../docs/plan/mcp/score-authoring-mvp-handoff.md)を再開入口にしてください。新規構築操作・操作配列はまだ実装していません。
+空からの構築に加え、既存曲への追加・修正と、装飾音符・トリル・ペダル等の専門編集に対応しています。現行仕様は[継続的な譜面編集](../../../docs/plan/mcp/score-editing-api.md)、表現範囲は[対応表](../../../docs/plan/mcp/notation-capabilities.md)を参照してください。11ツールと28種類の編集操作があります。
 
 ## ビルドと登録
 
 このディレクトリで実行します。
 
 ```powershell
+node --experimental-transform-types generate-contract.mjs
 cargo test
 cargo build --release
 ```
@@ -36,16 +37,24 @@ cargo build --release
 | `ping` | MCPサーバー単体の疎通。GUI不要。 |
 | `list_clavierdesk_sessions` | 公開中かつ認証付き生存確認に成功したセッションのID・PID・公開開始時刻。 |
 | `probe_session(sessionId)` | 指定セッションのWebViewまで疎通確認。 |
-| `begin_checkout(sessionId)` | 編集権取得とUIロック。返された`checkoutId`を以降の要求に使う。 |
+| `get_capabilities(sessionId, operation?)` | 操作一覧と制限。operationを指定するとその引数スキーマ。チェックアウト不要。 |
+| `get_score_overview(sessionId, checkoutId?)` | 小節番号とID・セクション・設定・revision。UIロックなしで実データを取得。 |
+| `get_score_range(sessionId, …)` | 既定4・最大8小節、段・声部で絞り込み。checkoutIdを付けると作業用データ。 |
+| `begin_checkout(sessionId)` | 編集権取得とUIロック。checkoutIdとrevisionを返す。 |
 | `get_editor_state(sessionId, checkoutId)` | 作業用の譜面・カーソル・選択・未保存状態を取得。 |
-| `apply_edit(sessionId, checkoutId, …)` | 作業用データに編集を蓄積。現在は`set_pitch_fingering`のみ。 |
+| `apply_edit(sessionId, checkoutId, …)` | requestId・expectedRevision・operationsで専門編集を原子的に蓄積。旧単一set_pitch_fingering形式も互換維持。 |
 | `finish_checkout(sessionId, checkoutId)` | 全編集を一度だけ実プロジェクト・Undo履歴に反映し、所有権とUIロックを解除。その後で完了通知。 |
+| `cancel_checkout(sessionId, checkoutId)` | 作業用データを破棄し、UIロック解除。Undo履歴を追加しない。 |
 
 入力の下書き、メニュー、ダイアログ、ファイル操作、再生がある間は`EDITOR_BUSY`でチェックアウトを拒否します。下書きを自動確定・破棄しません。
 
 チェックアウト中は、画面の`Stop MCP editing`ボタンまたはCtrl＋Shift＋Mで強制停止できます。未反映の編集を破棄し、UIロックを解除してから通知します。以前の`checkoutId`は無効になり、同じエージェントが再チェックアウトしても遅延要求を拒否します。反映後の変更はUndoで戻します。
 
-編集ツールの`changed`は作業用データの変更を表します。実プロジェクトへの反映は`finish_checkout`で行い、自動保存はしません。汎用の操作配列・条件クエリ・全構造検証、MCP世代管理は未追加です。GUIとMCPサーバーを同じソースからビルドし、ツールスキーマ変更後はMCPクライアントを再接続してください。
+編集ツールのchangedは作業用データの変更です。実プロジェクトへの反映はfinish_checkoutで行い、自動保存はしません。新しい操作配列要求は、begin_checkoutまたはチェックアウトの読み取りで得たrevisionをexpectedRevisionに渡します。成功応答のrevisionを次の要求に使います。同じrequestId・expectedRevision・operationsの再送は元の結果を返し、重複適用しません。
+
+finish_checkout後に再取得し、新しいチェックアウトで追加・修正できます。参照が切れる修正は黙って表現を削除せず、明示的な解除・端点変更を要求します。GUIとMCPを同じソースからビルドし、スキーマ変更後はMCPクライアントを再接続してください。画像の判読はエージェントの責務です。
+
+操作契約はGUIの`score-edit-contract.ts`にまとめています。変更時にはgenerate-contract.mjsでRust向けスキーマを再生成します。テストで生成物の一致を確認します。
 
 ## 接続方式
 

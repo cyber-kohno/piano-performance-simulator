@@ -1,6 +1,7 @@
 use rmcp::{transport::stdio, ServiceExt};
 
 mod bridge;
+mod edit_contract;
 mod server;
 
 #[tokio::main]

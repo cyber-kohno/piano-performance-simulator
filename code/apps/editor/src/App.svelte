@@ -61,7 +61,37 @@
       return null;
     },
     getEditContext: () => ({ project, timelineCursor }),
-    updateProject: (previous, next) => { project = next; recordProjectChange(previous); },
+    updateProject: (previous, next, focusFirstMeasure) => {
+      project = next;
+      if (focusFirstMeasure) {
+        const first = next.outline.find(block => block.type === 'measure');
+        if (first) outlineCursor = { blockId: first.id };
+        timelineCursor = createTimelineCursor();
+        mode = 'outline';
+        pedalMode = false;
+        ottavaMode = false;
+      } else {
+        const selected = next.outline.find(block => block.id === outlineCursor.blockId);
+        if (!selected) {
+          const previousIndex = previous.outline.findIndex(block => block.id === outlineCursor.blockId);
+          const fallback = next.outline[Math.min(Math.max(1, previousIndex), next.outline.length - 1)];
+          outlineCursor = { blockId: fallback.id };
+        }
+        const focused = timelineCursor.focusedNoteId ? ScoreTimeline.note(next.outline, timelineCursor.focusedNoteId, timelineCursor.staff) : undefined;
+        if (focused) timelineCursor = { ...timelineCursor, voiceIndex: focused.voiceIndex,
+          positionSixteenths: focused.measureStartSixteenths + focused.positionSixteenths,
+          focusedPitchIndex: Math.min(timelineCursor.focusedPitchIndex ?? 0, focused.note.pitches.length - 1),
+          pitch: focused.note.pitches[Math.min(timelineCursor.focusedPitchIndex ?? 0, focused.note.pitches.length - 1)].midi,
+          selectionAnchorNoteId: null, focusedGraceId: null };
+        else {
+          timelineCursor = { ...createTimelineCursor(timelineCursor.staff), positionSixteenths: ScoreTimeline.outlinePosition(next.outline, outlineCursor.blockId) };
+          if (!next.outline.some(block => block.type === 'measure')) mode = 'outline';
+        }
+        pedalMode = false;
+        ottavaMode = false;
+      }
+      recordProjectChange(previous);
+    },
     checkoutChanged: state => {
       mcpCheckout = state.active;
       keyHold.reset();

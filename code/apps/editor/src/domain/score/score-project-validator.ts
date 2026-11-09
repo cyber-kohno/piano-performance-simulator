@@ -124,7 +124,7 @@ namespace ScoreProjectValidator {
     if (value.trills !== undefined && (!Array.isArray(value.trills) || !value.trills.every(item =>
       isRecord(item) && isId(item.id) && item.kind === 'trill' && isId(item.startNoteId) && isId(item.endNoteId) &&
       isRecord(item.settings) && ['diatonic', 'half', 'whole'].includes(String(item.settings.auxiliary)) &&
-      ['main', 'auxiliary'].includes(String(item.settings.start)) && isIntegerIn(item.settings.attackCount, 1, 64)))) return false;
+      ['main', 'auxiliary'].includes(String(item.settings.start)) && isIntegerIn(item.settings.attackCount, 2, 128)))) return false;
     return true;
   }
 

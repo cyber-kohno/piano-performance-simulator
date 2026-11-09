@@ -1,0 +1,2280 @@
+{
+  "type": "array",
+  "items": {
+    "anyOf": [
+      {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "create_score"
+            ]
+          },
+          "settings": {
+            "type": "object",
+            "properties": {
+              "meter": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 64
+                },
+                "minItems": 2,
+                "maxItems": 2
+              },
+              "keyFifths": {
+                "type": "integer",
+                "minimum": -7,
+                "maximum": 7
+              },
+              "tempo": {
+                "type": "integer",
+                "minimum": 10,
+                "maximum": 400
+              }
+            },
+            "required": [
+              "meter",
+              "keyFifths",
+              "tempo"
+            ],
+            "additionalProperties": false
+          },
+          "measures": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "upper": {
+                  "type": "array",
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "value": {
+                              "type": "string",
+                              "pattern": "^(1|2|4|8|16|32)\\.{0,2}$"
+                            },
+                            "pitches": {
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "pattern": "^([A-G])(bb|##|b|#)?(-1|[0-9])$"
+                              },
+                              "minItems": 1,
+                              "maxItems": 88
+                            },
+                            "tie": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "value",
+                            "pitches"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "value": {
+                              "type": "string",
+                              "pattern": "^(1|2|4|8|16|32)\\.{0,2}$"
+                            },
+                            "rest": {
+                              "type": "boolean",
+                              "enum": [
+                                true
+                              ]
+                            }
+                          },
+                          "required": [
+                            "value",
+                            "rest"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "tuplet": {
+                              "type": "object",
+                              "properties": {
+                                "actual": {
+                                  "type": "integer",
+                                  "minimum": 2,
+                                  "maximum": 64
+                                },
+                                "normal": {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 64
+                                },
+                                "base": {
+                                  "type": "string",
+                                  "pattern": "^(1|2|4|8|16|32)\\.{0,2}$"
+                                },
+                                "events": {
+                                  "type": "array",
+                                  "items": {
+                                    "anyOf": [
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "value": {
+                                            "type": "string",
+                                            "pattern": "^(1|2|4|8|16|32)\\.{0,2}$"
+                                          },
+                                          "pitches": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "string",
+                                              "pattern": "^([A-G])(bb|##|b|#)?(-1|[0-9])$"
+                                            },
+                                            "minItems": 1,
+                                            "maxItems": 88
+                                          },
+                                          "tie": {
+                                            "type": "boolean"
+                                          }
+                                        },
+                                        "required": [
+                                          "value",
+                                          "pitches"
+                                        ],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "value": {
+                                            "type": "string",
+                                            "pattern": "^(1|2|4|8|16|32)\\.{0,2}$"
+                                          },
+                                          "rest": {
+                                            "type": "boolean",
+                                            "enum": [
+                                              true
+                                            ]
+                                          }
+                                        },
+                                        "required": [
+                                          "value",
+                                          "rest"
+                                        ],
+                                        "additionalProperties": false
+                                      }
+                                    ]
+                                  },
+                                  "minItems": 2,
+                                  "maxItems": 64
+                                }
+                              },
+                              "required": [
+                                "actual",
+                                "normal",
+                                "base",
+                                "events"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "required": [
+                            "tuplet"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    },
+                    "minItems": 1,
+                    "maxItems": 256
+                  },
+                  "minItems": 1,
+                  "maxItems": 3
+                },
+                "lower": {
+                  "type": "array",
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "value": {
+                              "type": "string",
+                              "pattern": "^(1|2|4|8|16|32)\\.{0,2}$"
+                            },
+                            "pitches": {
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "pattern": "^([A-G])(bb|##|b|#)?(-1|[0-9])$"
+                              },
+                              "minItems": 1,
+                              "maxItems": 88
+                            },
+                            "tie": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "value",
+                            "pitches"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "value": {
+                              "type": "string",
+                              "pattern": "^(1|2|4|8|16|32)\\.{0,2}$"
+                            },
+                            "rest": {
+                              "type": "boolean",
+                              "enum": [
+                                true
+                              ]
+                            }
+                          },
+                          "required": [
+                            "value",
+                            "rest"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "tuplet": {
+                              "type": "object",
+                              "properties": {
+                                "actual": {
+                                  "type": "integer",
+                                  "minimum": 2,
+                                  "maximum": 64
+                                },
+                                "normal": {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 64
+                                },
+                                "base": {
+                                  "type": "string",
+                                  "pattern": "^(1|2|4|8|16|32)\\.{0,2}$"
+                                },
+                                "events": {
+                                  "type": "array",
+                                  "items": {
+                                    "anyOf": [
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "value": {
+                                            "type": "string",
+                                            "pattern": "^(1|2|4|8|16|32)\\.{0,2}$"
+                                          },
+                                          "pitches": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "string",
+                                              "pattern": "^([A-G])(bb|##|b|#)?(-1|[0-9])$"
+                                            },
+                                            "minItems": 1,
+                                            "maxItems": 88
+                                          },
+                                          "tie": {
+                                            "type": "boolean"
+                                          }
+                                        },
+                                        "required": [
+                                          "value",
+                                          "pitches"
+                                        ],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "value": {
+                                            "type": "string",
+                                            "pattern": "^(1|2|4|8|16|32)\\.{0,2}$"
+                                          },
+                                          "rest": {
+                                            "type": "boolean",
+                                            "enum": [
+                                              true
+                                            ]
+                                          }
+                                        },
+                                        "required": [
+                                          "value",
+                                          "rest"
+                                        ],
+                                        "additionalProperties": false
+                                      }
+                                    ]
+                                  },
+                                  "minItems": 2,
+                                  "maxItems": 64
+                                }
+                              },
+                              "required": [
+                                "actual",
+                                "normal",
+                                "base",
+                                "events"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "required": [
+                            "tuplet"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    },
+                    "minItems": 1,
+                    "maxItems": 256
+                  },
+                  "minItems": 1,
+                  "maxItems": 3
+                },
+                "length": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 256
+                  },
+                  "minItems": 2,
+                  "maxItems": 2
+                }
+              },
+              "required": [],
+              "additionalProperties": false
+            },
+            "minItems": 1,
+            "maxItems": 32
+          }
+        },
+        "required": [
+          "type",
+          "settings",
+          "measures"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "append_measures"
+            ]
+          },
+          "measures": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "upper": {
+                  "type": "array",
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "value": {
+                              "type": "string",
+                              "pattern": "^(1|2|4|8|16|32)\\.{0,2}$"
+                            },
+                            "pitches": {
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "pattern": "^([A-G])(bb|##|b|#)?(-1|[0-9])$"
+                              },
+                              "minItems": 1,
+                              "maxItems": 88
+                            },
+                            "tie": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "value",
+                            "pitches"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "value": {
+                              "type": "string",
+                              "pattern": "^(1|2|4|8|16|32)\\.{0,2}$"
+                            },
+                            "rest": {
+                              "type": "boolean",
+                              "enum": [
+                                true
+                              ]
+                            }
+                          },
+                          "required": [
+                            "value",
+                            "rest"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "tuplet": {
+                              "type": "object",
+                              "properties": {
+                                "actual": {
+                                  "type": "integer",
+                                  "minimum": 2,
+                                  "maximum": 64
+                                },
+                                "normal": {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 64
+                                },
+                                "base": {
+                                  "type": "string",
+                                  "pattern": "^(1|2|4|8|16|32)\\.{0,2}$"
+                                },
+                                "events": {
+                                  "type": "array",
+                                  "items": {
+                                    "anyOf": [
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "value": {
+                                            "type": "string",
+                                            "pattern": "^(1|2|4|8|16|32)\\.{0,2}$"
+                                          },
+                                          "pitches": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "string",
+                                              "pattern": "^([A-G])(bb|##|b|#)?(-1|[0-9])$"
+                                            },
+                                            "minItems": 1,
+                                            "maxItems": 88
+                                          },
+                                          "tie": {
+                                            "type": "boolean"
+                                          }
+                                        },
+                                        "required": [
+                                          "value",
+                                          "pitches"
+                                        ],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "value": {
+                                            "type": "string",
+                                            "pattern": "^(1|2|4|8|16|32)\\.{0,2}$"
+                                          },
+                                          "rest": {
+                                            "type": "boolean",
+                                            "enum": [
+                                              true
+                                            ]
+                                          }
+                                        },
+                                        "required": [
+                                          "value",
+                                          "rest"
+                                        ],
+                                        "additionalProperties": false
+                                      }
+                                    ]
+                                  },
+                                  "minItems": 2,
+                                  "maxItems": 64
+                                }
+                              },
+                              "required": [
+                                "actual",
+                                "normal",
+                                "base",
+                                "events"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "required": [
+                            "tuplet"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    },
+                    "minItems": 1,
+                    "maxItems": 256
+                  },
+                  "minItems": 1,
+                  "maxItems": 3
+                },
+                "lower": {
+                  "type": "array",
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "value": {
+                              "type": "string",
+                              "pattern": "^(1|2|4|8|16|32)\\.{0,2}$"
+                            },
+                            "pitches": {
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "pattern": "^([A-G])(bb|##|b|#)?(-1|[0-9])$"
+                              },
+                              "minItems": 1,
+                              "maxItems": 88
+                            },
+                            "tie": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "value",
+                            "pitches"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "value": {
+                              "type": "string",
+                              "pattern": "^(1|2|4|8|16|32)\\.{0,2}$"
+                            },
+                            "rest": {
+                              "type": "boolean",
+                              "enum": [
+                                true
+                              ]
+                            }
+                          },
+                          "required": [
+                            "value",
+                            "rest"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "tuplet": {
+                              "type": "object",
+                              "properties": {
+                                "actual": {
+                                  "type": "integer",
+                                  "minimum": 2,
+                                  "maximum": 64
+                                },
+                                "normal": {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 64
+                                },
+                                "base": {
+                                  "type": "string",
+                                  "pattern": "^(1|2|4|8|16|32)\\.{0,2}$"
+                                },
+                                "events": {
+                                  "type": "array",
+                                  "items": {
+                                    "anyOf": [
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "value": {
+                                            "type": "string",
+                                            "pattern": "^(1|2|4|8|16|32)\\.{0,2}$"
+                                          },
+                                          "pitches": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "string",
+                                              "pattern": "^([A-G])(bb|##|b|#)?(-1|[0-9])$"
+                                            },
+                                            "minItems": 1,
+                                            "maxItems": 88
+                                          },
+                                          "tie": {
+                                            "type": "boolean"
+                                          }
+                                        },
+                                        "required": [
+                                          "value",
+                                          "pitches"
+                                        ],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "value": {
+                                            "type": "string",
+                                            "pattern": "^(1|2|4|8|16|32)\\.{0,2}$"
+                                          },
+                                          "rest": {
+                                            "type": "boolean",
+                                            "enum": [
+                                              true
+                                            ]
+                                          }
+                                        },
+                                        "required": [
+                                          "value",
+                                          "rest"
+                                        ],
+                                        "additionalProperties": false
+                                      }
+                                    ]
+                                  },
+                                  "minItems": 2,
+                                  "maxItems": 64
+                                }
+                              },
+                              "required": [
+                                "actual",
+                                "normal",
+                                "base",
+                                "events"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "required": [
+                            "tuplet"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    },
+                    "minItems": 1,
+                    "maxItems": 256
+                  },
+                  "minItems": 1,
+                  "maxItems": 3
+                },
+                "length": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 256
+                  },
+                  "minItems": 2,
+                  "maxItems": 2
+                }
+              },
+              "required": [],
+              "additionalProperties": false
+            },
+            "minItems": 1,
+            "maxItems": 32
+          }
+        },
+        "required": [
+          "type",
+          "measures"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "insert_measures"
+            ]
+          },
+          "afterMeasureId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "measures": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "upper": {
+                  "type": "array",
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "value": {
+                              "type": "string",
+                              "pattern": "^(1|2|4|8|16|32)\\.{0,2}$"
+                            },
+                            "pitches": {
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "pattern": "^([A-G])(bb|##|b|#)?(-1|[0-9])$"
+                              },
+                              "minItems": 1,
+                              "maxItems": 88
+                            },
+                            "tie": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "value",
+                            "pitches"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "value": {
+                              "type": "string",
+                              "pattern": "^(1|2|4|8|16|32)\\.{0,2}$"
+                            },
+                            "rest": {
+                              "type": "boolean",
+                              "enum": [
+                                true
+                              ]
+                            }
+                          },
+                          "required": [
+                            "value",
+                            "rest"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "tuplet": {
+                              "type": "object",
+                              "properties": {
+                                "actual": {
+                                  "type": "integer",
+                                  "minimum": 2,
+                                  "maximum": 64
+                                },
+                                "normal": {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 64
+                                },
+                                "base": {
+                                  "type": "string",
+                                  "pattern": "^(1|2|4|8|16|32)\\.{0,2}$"
+                                },
+                                "events": {
+                                  "type": "array",
+                                  "items": {
+                                    "anyOf": [
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "value": {
+                                            "type": "string",
+                                            "pattern": "^(1|2|4|8|16|32)\\.{0,2}$"
+                                          },
+                                          "pitches": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "string",
+                                              "pattern": "^([A-G])(bb|##|b|#)?(-1|[0-9])$"
+                                            },
+                                            "minItems": 1,
+                                            "maxItems": 88
+                                          },
+                                          "tie": {
+                                            "type": "boolean"
+                                          }
+                                        },
+                                        "required": [
+                                          "value",
+                                          "pitches"
+                                        ],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "value": {
+                                            "type": "string",
+                                            "pattern": "^(1|2|4|8|16|32)\\.{0,2}$"
+                                          },
+                                          "rest": {
+                                            "type": "boolean",
+                                            "enum": [
+                                              true
+                                            ]
+                                          }
+                                        },
+                                        "required": [
+                                          "value",
+                                          "rest"
+                                        ],
+                                        "additionalProperties": false
+                                      }
+                                    ]
+                                  },
+                                  "minItems": 2,
+                                  "maxItems": 64
+                                }
+                              },
+                              "required": [
+                                "actual",
+                                "normal",
+                                "base",
+                                "events"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "required": [
+                            "tuplet"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    },
+                    "minItems": 1,
+                    "maxItems": 256
+                  },
+                  "minItems": 1,
+                  "maxItems": 3
+                },
+                "lower": {
+                  "type": "array",
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "value": {
+                              "type": "string",
+                              "pattern": "^(1|2|4|8|16|32)\\.{0,2}$"
+                            },
+                            "pitches": {
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "pattern": "^([A-G])(bb|##|b|#)?(-1|[0-9])$"
+                              },
+                              "minItems": 1,
+                              "maxItems": 88
+                            },
+                            "tie": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "value",
+                            "pitches"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "value": {
+                              "type": "string",
+                              "pattern": "^(1|2|4|8|16|32)\\.{0,2}$"
+                            },
+                            "rest": {
+                              "type": "boolean",
+                              "enum": [
+                                true
+                              ]
+                            }
+                          },
+                          "required": [
+                            "value",
+                            "rest"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "tuplet": {
+                              "type": "object",
+                              "properties": {
+                                "actual": {
+                                  "type": "integer",
+                                  "minimum": 2,
+                                  "maximum": 64
+                                },
+                                "normal": {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 64
+                                },
+                                "base": {
+                                  "type": "string",
+                                  "pattern": "^(1|2|4|8|16|32)\\.{0,2}$"
+                                },
+                                "events": {
+                                  "type": "array",
+                                  "items": {
+                                    "anyOf": [
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "value": {
+                                            "type": "string",
+                                            "pattern": "^(1|2|4|8|16|32)\\.{0,2}$"
+                                          },
+                                          "pitches": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "string",
+                                              "pattern": "^([A-G])(bb|##|b|#)?(-1|[0-9])$"
+                                            },
+                                            "minItems": 1,
+                                            "maxItems": 88
+                                          },
+                                          "tie": {
+                                            "type": "boolean"
+                                          }
+                                        },
+                                        "required": [
+                                          "value",
+                                          "pitches"
+                                        ],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "value": {
+                                            "type": "string",
+                                            "pattern": "^(1|2|4|8|16|32)\\.{0,2}$"
+                                          },
+                                          "rest": {
+                                            "type": "boolean",
+                                            "enum": [
+                                              true
+                                            ]
+                                          }
+                                        },
+                                        "required": [
+                                          "value",
+                                          "rest"
+                                        ],
+                                        "additionalProperties": false
+                                      }
+                                    ]
+                                  },
+                                  "minItems": 2,
+                                  "maxItems": 64
+                                }
+                              },
+                              "required": [
+                                "actual",
+                                "normal",
+                                "base",
+                                "events"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "required": [
+                            "tuplet"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    },
+                    "minItems": 1,
+                    "maxItems": 256
+                  },
+                  "minItems": 1,
+                  "maxItems": 3
+                },
+                "length": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 256
+                  },
+                  "minItems": 2,
+                  "maxItems": 2
+                }
+              },
+              "required": [],
+              "additionalProperties": false
+            },
+            "minItems": 1,
+            "maxItems": 32
+          }
+        },
+        "required": [
+          "type",
+          "afterMeasureId",
+          "measures"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "remove_measures"
+            ]
+          },
+          "measureIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "minItems": 1,
+            "maxItems": 32
+          }
+        },
+        "required": [
+          "type",
+          "measureIds"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "replace_voice"
+            ]
+          },
+          "measureId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "staff": {
+            "type": "string",
+            "enum": [
+              "upperStaff",
+              "lowerStaff"
+            ]
+          },
+          "voiceIndex": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "value": {
+                      "type": "string",
+                      "pattern": "^(1|2|4|8|16|32)\\.{0,2}$"
+                    },
+                    "pitches": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "pattern": "^([A-G])(bb|##|b|#)?(-1|[0-9])$"
+                      },
+                      "minItems": 1,
+                      "maxItems": 88
+                    },
+                    "tie": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "value",
+                    "pitches"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "value": {
+                      "type": "string",
+                      "pattern": "^(1|2|4|8|16|32)\\.{0,2}$"
+                    },
+                    "rest": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    }
+                  },
+                  "required": [
+                    "value",
+                    "rest"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "tuplet": {
+                      "type": "object",
+                      "properties": {
+                        "actual": {
+                          "type": "integer",
+                          "minimum": 2,
+                          "maximum": 64
+                        },
+                        "normal": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 64
+                        },
+                        "base": {
+                          "type": "string",
+                          "pattern": "^(1|2|4|8|16|32)\\.{0,2}$"
+                        },
+                        "events": {
+                          "type": "array",
+                          "items": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "value": {
+                                    "type": "string",
+                                    "pattern": "^(1|2|4|8|16|32)\\.{0,2}$"
+                                  },
+                                  "pitches": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string",
+                                      "pattern": "^([A-G])(bb|##|b|#)?(-1|[0-9])$"
+                                    },
+                                    "minItems": 1,
+                                    "maxItems": 88
+                                  },
+                                  "tie": {
+                                    "type": "boolean"
+                                  }
+                                },
+                                "required": [
+                                  "value",
+                                  "pitches"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "value": {
+                                    "type": "string",
+                                    "pattern": "^(1|2|4|8|16|32)\\.{0,2}$"
+                                  },
+                                  "rest": {
+                                    "type": "boolean",
+                                    "enum": [
+                                      true
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "value",
+                                  "rest"
+                                ],
+                                "additionalProperties": false
+                              }
+                            ]
+                          },
+                          "minItems": 2,
+                          "maxItems": 64
+                        }
+                      },
+                      "required": [
+                        "actual",
+                        "normal",
+                        "base",
+                        "events"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "tuplet"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "minItems": 1,
+            "maxItems": 256
+          }
+        },
+        "required": [
+          "type",
+          "measureId",
+          "staff",
+          "voiceIndex",
+          "events"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "remove_voice"
+            ]
+          },
+          "measureId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "staff": {
+            "type": "string",
+            "enum": [
+              "upperStaff",
+              "lowerStaff"
+            ]
+          },
+          "voiceIndex": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2
+          }
+        },
+        "required": [
+          "type",
+          "measureId",
+          "staff",
+          "voiceIndex"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "set_pitches"
+            ]
+          },
+          "noteId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "pitches": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^([A-G])(bb|##|b|#)?(-1|[0-9])$"
+            },
+            "minItems": 1,
+            "maxItems": 88
+          }
+        },
+        "required": [
+          "type",
+          "noteId",
+          "pitches"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "set_value"
+            ]
+          },
+          "elementId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "value": {
+            "type": "string",
+            "pattern": "^(1|2|4|8|16|32)\\.{0,2}$"
+          }
+        },
+        "required": [
+          "type",
+          "elementId",
+          "value"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "set_rest"
+            ]
+          },
+          "noteId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          }
+        },
+        "required": [
+          "type",
+          "noteId"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "set_grace_notes"
+            ]
+          },
+          "noteId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "notes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "value": {
+                  "type": "string",
+                  "pattern": "^(1|2|4|8|16|32)\\.{0,2}$"
+                },
+                "pitch": {
+                  "type": "string",
+                  "pattern": "^([A-G])(bb|##|b|#)?(-1|[0-9])$"
+                },
+                "slash": {
+                  "type": "boolean"
+                },
+                "fingering": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 5
+                },
+                "substitutionFingering": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 5
+                }
+              },
+              "required": [
+                "value",
+                "pitch",
+                "slash"
+              ],
+              "additionalProperties": false
+            },
+            "minItems": 0,
+            "maxItems": 64
+          },
+          "performance": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "spreadRatio": {
+                    "type": "number",
+                    "minimum": 0.1,
+                    "maximum": 1
+                  },
+                  "timing": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  }
+                },
+                "required": [
+                  "spreadRatio",
+                  "timing"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "noteId",
+          "notes"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "set_note_expression"
+            ]
+          },
+          "noteId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "staccato": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "normal",
+                      "staccatissimo"
+                    ]
+                  },
+                  "lengthRatio": {
+                    "type": "number",
+                    "minimum": 0.1,
+                    "maximum": 0.9
+                  }
+                },
+                "required": [
+                  "type",
+                  "lengthRatio"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "arpeggio": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "normal",
+                      "down"
+                    ]
+                  },
+                  "spreadRatio": {
+                    "type": "number",
+                    "minimum": 0.1,
+                    "maximum": 1
+                  },
+                  "timing": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  }
+                },
+                "required": [
+                  "type",
+                  "spreadRatio",
+                  "timing"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "noteId"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "set_fingering"
+            ]
+          },
+          "noteId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "graceNoteId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "pitchIndex": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 87
+          },
+          "fingering": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 5
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "substitutionFingering": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 5
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "noteId",
+          "pitchIndex",
+          "fingering"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "set_tie"
+            ]
+          },
+          "fromNoteId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "toNoteId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "fromNoteId",
+          "toNoteId"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "set_slur"
+            ]
+          },
+          "slurId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "startNoteId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "endNoteId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          }
+        },
+        "required": [
+          "type",
+          "startNoteId",
+          "endNoteId"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "remove_slur"
+            ]
+          },
+          "slurId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          }
+        },
+        "required": [
+          "type",
+          "slurId"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "set_trill"
+            ]
+          },
+          "noteId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "settings": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "auxiliary": {
+                    "type": "string",
+                    "enum": [
+                      "diatonic",
+                      "half",
+                      "whole"
+                    ]
+                  },
+                  "start": {
+                    "type": "string",
+                    "enum": [
+                      "main",
+                      "auxiliary"
+                    ]
+                  },
+                  "attackCount": {
+                    "type": "integer",
+                    "minimum": 2,
+                    "maximum": 128
+                  }
+                },
+                "required": [
+                  "auxiliary",
+                  "start",
+                  "attackCount"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "noteId",
+          "settings"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "set_pedal_event"
+            ]
+          },
+          "position": {
+            "type": "object",
+            "properties": {
+              "measureId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "offset": {
+                "type": "object",
+                "properties": {
+                  "numerator": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 1048576
+                  },
+                  "denominator": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 1048576
+                  }
+                },
+                "required": [
+                  "numerator",
+                  "denominator"
+                ],
+                "additionalProperties": false,
+                "description": "Exact offset within the measure, measured in quarter notes. 1/2 is an eighth note. Only a stop event may use the score end."
+              }
+            },
+            "required": [
+              "measureId",
+              "offset"
+            ],
+            "additionalProperties": false
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "start",
+              "change",
+              "stop"
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "position",
+          "action"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "remove_pedal_event"
+            ]
+          },
+          "position": {
+            "type": "object",
+            "properties": {
+              "measureId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "offset": {
+                "type": "object",
+                "properties": {
+                  "numerator": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 1048576
+                  },
+                  "denominator": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 1048576
+                  }
+                },
+                "required": [
+                  "numerator",
+                  "denominator"
+                ],
+                "additionalProperties": false,
+                "description": "Exact offset within the measure, measured in quarter notes. 1/2 is an eighth note. Only a stop event may use the score end."
+              }
+            },
+            "required": [
+              "measureId",
+              "offset"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "type",
+          "position"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "set_ottava_event"
+            ]
+          },
+          "position": {
+            "type": "object",
+            "properties": {
+              "measureId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "offset": {
+                "type": "object",
+                "properties": {
+                  "numerator": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 1048576
+                  },
+                  "denominator": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 1048576
+                  }
+                },
+                "required": [
+                  "numerator",
+                  "denominator"
+                ],
+                "additionalProperties": false,
+                "description": "Exact offset within the measure, measured in quarter notes. 1/2 is an eighth note. Only a stop event may use the score end."
+              }
+            },
+            "required": [
+              "measureId",
+              "offset"
+            ],
+            "additionalProperties": false
+          },
+          "staff": {
+            "type": "string",
+            "enum": [
+              "upperStaff",
+              "lowerStaff"
+            ]
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "start",
+              "stop"
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "position",
+          "staff",
+          "action"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "remove_ottava_event"
+            ]
+          },
+          "position": {
+            "type": "object",
+            "properties": {
+              "measureId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "offset": {
+                "type": "object",
+                "properties": {
+                  "numerator": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 1048576
+                  },
+                  "denominator": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 1048576
+                  }
+                },
+                "required": [
+                  "numerator",
+                  "denominator"
+                ],
+                "additionalProperties": false,
+                "description": "Exact offset within the measure, measured in quarter notes. 1/2 is an eighth note. Only a stop event may use the score end."
+              }
+            },
+            "required": [
+              "measureId",
+              "offset"
+            ],
+            "additionalProperties": false
+          },
+          "staff": {
+            "type": "string",
+            "enum": [
+              "upperStaff",
+              "lowerStaff"
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "position",
+          "staff"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "set_tempo_change"
+            ]
+          },
+          "noteId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "bpm": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 10,
+                "maximum": 400
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "noteId",
+          "bpm"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "set_clef_change"
+            ]
+          },
+          "noteId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "clef": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "treble",
+                  "bass"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "noteId",
+          "clef"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "set_initial_values"
+            ]
+          },
+          "settings": {
+            "type": "object",
+            "properties": {
+              "meter": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 64
+                },
+                "minItems": 2,
+                "maxItems": 2
+              },
+              "keyFifths": {
+                "type": "integer",
+                "minimum": -7,
+                "maximum": 7
+              },
+              "tempo": {
+                "type": "integer",
+                "minimum": 10,
+                "maximum": 400
+              }
+            },
+            "required": [
+              "meter",
+              "keyFifths",
+              "tempo"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "type",
+          "settings"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "set_measure_length"
+            ]
+          },
+          "measureId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "length": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 256
+            },
+            "minItems": 2,
+            "maxItems": 2
+          }
+        },
+        "required": [
+          "type",
+          "measureId",
+          "length"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "set_key_change"
+            ]
+          },
+          "beforeMeasureId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "afterBlockId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "keyChangeId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "keyFifths": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": -7,
+                "maximum": 7
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "keyFifths"
+        ],
+        "additionalProperties": false,
+        "description": "Specify exactly one of beforeMeasureId, afterBlockId, or existing keyChangeId. null keyFifths removes the targeted change."
+      },
+      {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "insert_section"
+            ]
+          },
+          "beforeMeasureId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "afterBlockId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 256
+          }
+        },
+        "required": [
+          "type",
+          "name"
+        ],
+        "additionalProperties": false,
+        "description": "Specify exactly one of beforeMeasureId or afterBlockId. afterBlockId can create a trailing empty section."
+      },
+      {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "rename_section"
+            ]
+          },
+          "sectionId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 256
+          }
+        },
+        "required": [
+          "type",
+          "sectionId",
+          "name"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "remove_section"
+            ]
+          },
+          "sectionId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          }
+        },
+        "required": [
+          "type",
+          "sectionId"
+        ],
+        "additionalProperties": false
+      }
+    ]
+  },
+  "minItems": 1,
+  "maxItems": 64
+}

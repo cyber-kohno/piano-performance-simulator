@@ -1,0 +1,42 @@
+{
+  "requestId": "example-eight-measures",
+  "expectedRevision": "replace-with-revision-from-begin-checkout",
+  "operations": [
+    {
+      "type": "create_score",
+      "settings": { "meter": [4, 4], "keyFifths": 0, "tempo": 100 },
+      "measures": [
+        {
+          "upper": [[{ "value": "4", "pitches": ["C5", "E5", "G5"] }, { "value": "4", "pitches": ["D5"] }, { "value": "2", "rest": true }]],
+          "lower": [[{ "value": "1", "pitches": ["C3", "G3"] }]]
+        },
+        {
+          "upper": [[{ "value": "4.", "pitches": ["E5"] }, { "value": "8", "pitches": ["F#5"] }, { "value": "2", "pitches": ["G5"] }]],
+          "lower": [[{ "value": "2", "pitches": ["C3"] }, { "value": "2", "pitches": ["G2"] }]]
+        },
+        {
+          "upper": [[{ "tuplet": { "actual": 3, "normal": 2, "base": "8", "events": [{ "value": "8", "pitches": ["C5"] }, { "value": "8", "rest": true }, { "value": "8", "pitches": ["E5"] }] } }, { "value": "2.", "pitches": ["G5"] }]]
+        },
+        {
+          "upper": [[{ "value": "1", "pitches": ["C5"], "tie": true }], [{ "value": "1", "pitches": ["E4"] }]],
+          "lower": [[{ "value": "1", "pitches": ["C3", "G3"] }]]
+        },
+        {
+          "upper": [[{ "value": "2", "pitches": ["C5"] }, { "value": "2", "pitches": ["D5"] }], [{ "value": "1", "pitches": ["G4"] }]]
+        },
+        {
+          "upper": [[{ "value": "1", "rest": true }]],
+          "lower": [[{ "value": "1", "pitches": ["C3"], "tie": true }]]
+        },
+        {
+          "upper": [[{ "value": "4", "pitches": ["C5"] }, { "value": "4", "pitches": ["D5"] }, { "value": "4", "pitches": ["E5"] }, { "value": "4", "pitches": ["Bb5"] }]],
+          "lower": [[{ "value": "1", "pitches": ["C3"] }]]
+        },
+        {
+          "upper": [[{ "value": "1", "pitches": ["C5", "E5", "G5"] }]],
+          "lower": [[{ "value": "1", "pitches": ["C3", "G3"] }]]
+        }
+      ]
+    }
+  ]
+}

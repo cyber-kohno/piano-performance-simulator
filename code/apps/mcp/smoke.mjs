@@ -48,11 +48,20 @@ try {
   child.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n');
   assert.equal(initialized.serverInfo.name, 'clavierdesk-mcp');
   const catalog = await call('tools/list');
-  assert.deepEqual(catalog.tools.map(tool => tool.name).sort(), ['apply_edit', 'begin_checkout', 'finish_checkout', 'get_editor_state', 'list_clavierdesk_sessions', 'ping', 'probe_session']);
+  assert.deepEqual(catalog.tools.map(tool => tool.name).sort(), ['apply_edit', 'begin_checkout', 'cancel_checkout', 'finish_checkout', 'get_capabilities', 'get_editor_state', 'get_score_overview', 'get_score_range', 'list_clavierdesk_sessions', 'ping', 'probe_session']);
   for (const name of ['get_editor_state', 'apply_edit', 'finish_checkout']) {
     assert.ok(catalog.tools.find(tool => tool.name === name).inputSchema.required.includes('checkoutId'));
   }
   console.log('Tools:', catalog.tools.map(tool => tool.name).join(', '));
+  const constructionSchema = JSON.stringify(catalog.tools.find(tool => tool.name === 'apply_edit').inputSchema);
+  for (const field of ['requestId', 'expectedRevision', 'operations', 'create_score', 'append_measures', 'tuplet', 'set_grace_notes', 'set_trill', 'set_pedal_event']) assert.ok(constructionSchema.includes(field));
+  const construction = await call('tools/call', { name: 'apply_edit', arguments: {
+    sessionId: '../invalid', checkoutId: 'invalid', requestId: 'schema-smoke', expectedRevision: 'invalid', operations: [{
+      type: 'create_score', settings: { meter: [4, 4], keyFifths: 0, tempo: 100 }, measures: [{}],
+    }],
+  } });
+  assert.equal(construction.isError, true);
+  assert.equal(JSON.parse(construction.content[0].text).code, 'SESSION_NOT_AVAILABLE');
   assert.equal(value(await call('tools/call', { name: 'ping', arguments: {} })).status, 'ok');
   const { sessions } = value(await call('tools/call', { name: 'list_clavierdesk_sessions', arguments: {} }));
   console.log('Sessions:', JSON.stringify(sessions));
