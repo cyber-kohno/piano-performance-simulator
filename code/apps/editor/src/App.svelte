@@ -19,6 +19,7 @@
   import NoteMenu from './components/NoteMenu.svelte';
   import ExpressionModal from './components/ExpressionModal.svelte';
   import FloatingTextInput from './components/FloatingTextInput.svelte';
+  import FloatingText, { type FloatingTextState } from './state/floating-text-input.ts';
   import EditorDialog from './components/EditorDialog.svelte';
 
   import NoteSettings, { type NoteSettingsState } from './state/note-settings.ts';
@@ -47,16 +48,24 @@
   let mcpState = $state<McpSessionState>({ status: 'stopped', details: null, error: null });
   let mcpCheckout = $state(false);
   const mcpEditor = isTauri() ? McpEditorController.create({
-    getEditorState: () => ({ project, editor: { mode, outlineCursor: { ...outlineCursor }, timelineCursor: { ...timelineCursor },
+    getEditorState: draftProject => ({ project: draftProject, editor: { mode, outlineCursor: { ...outlineCursor }, timelineCursor: { ...timelineCursor },
       selectedNoteIds: selectedTimelineNotes.map(entry => entry.note.id), pedalMode, pedalCursor: { ...pedalCursor },
       ottavaMode, ottavaCursor: { ...ottavaCursor }, playbackActive: playback?.playing ?? false,
       hasUncommittedDialogInput: noteSettings !== null || sectionTextInput !== null || fingeringTextInput !== null },
-      file: { dirty: projectIsDirty, name: currentProjectFile?.name ?? null } }),
+      file: { dirty: ScoreProjectFileController.fingerprint(draftProject) !== savedProjectFingerprint, name: currentProjectFile?.name ?? null } }),
+    checkoutBlocker: () => {
+      if (noteSettings || sectionTextInput || fingeringTextInput) return 'Finish or cancel the current input before checkout.';
+      if (EditorDialogController.isOpen() || menuPath) return 'Close the current dialog or menu before checkout.';
+      if (fileOperationInProgress) return 'Wait for the file operation to finish before checkout.';
+      if (playback?.playing) return 'Stop playback before checkout.';
+      return null;
+    },
     getEditContext: () => ({ project, timelineCursor }),
     updateProject: (previous, next) => { project = next; recordProjectChange(previous); },
     checkoutChanged: state => {
-      mcpCheckout = state.active || state.completed;
-      if (state.completed) EditorDialogController.alert({ title: 'MCP Work Complete', messageLines: ['Review the changes. Close this dialog to unlock keyboard input.'], onClose: () => { mcpCheckout = false; mcp?.releaseCheckout(); } });
+      mcpCheckout = state.active;
+      keyHold.reset();
+      if (state.completed) EditorDialogController.alert({ title: 'MCP Work Complete', messageLines: ['The changes have been applied. Editing is unlocked.'] });
     },
   }) : null;
   const mcp = isTauri() && mcpEditor ? McpSessionController.create(TauriMcp, state => mcpState = state, mcpEditor) : null;
@@ -94,8 +103,29 @@
   let menuPath = $state<number[] | null>(null);
   let noteSettings=$state<NoteSettingsState|null>(null);
   let passageClipboard = $state<ScorePassageData | null>(null);
-  let sectionTextInput = $state<{ blockId: string; anchor: HTMLElement; value: string } | null>(null);
-  let fingeringTextInput = $state<{ noteId: string; pitchIndex: number; anchor: HTMLElement; value: string } | null>(null);
+  let sectionTextInput = $state<({ blockId: string; anchor: HTMLElement } & FloatingTextState) | null>(null);
+  let fingeringTextInput = $state<({ noteId: string; pitchIndex: number; anchor: HTMLElement } & FloatingTextState) | null>(null);
+  // Every UI mutation entry uses this gate; MCP writes use their separate checkout path.
+  function uiEditAllowed() { return !mcpCheckout; }
+  function stopMcpEditing() {
+    if (!mcpCheckout) return;
+    mcp?.releaseCheckout();
+    EditorDialogController.alert({ title: 'MCP Editing Stopped', messageLines: ['Pending changes were discarded. Editing is unlocked.'] });
+  }
+  function controlFloatingText(event: KeyboardEvent) {
+    const input = fingeringTextInput ?? sectionTextInput;
+    if (!input || !uiEditAllowed()) return;
+    event.preventDefault();
+    keyHold.reset();
+    const result = FloatingText.control(input, event, fingeringTextInput ? 3 : 32);
+    if (result.action === 'cancel') { fingeringTextInput = null; sectionTextInput = null; }
+    else if (result.action === 'commit') {
+      const value = input.value.trim();
+      if (fingeringTextInput) commitFingeringText(value);
+      else if (value) commitSectionText(value);
+    } else if (fingeringTextInput) fingeringTextInput = { ...fingeringTextInput, ...result.state };
+    else if (sectionTextInput) sectionTextInput = { ...sectionTextInput, ...result.state };
+  }
   function parseFingeringInput(value: string): { fingering: PianoFingering; substitutionFingering?: PianoFingering } | undefined {
     const match = /^([1-5])(?:-([1-5]))?$/.exec(value);
     if (!match) return undefined;
@@ -105,7 +135,7 @@
     return substitutionFingering === undefined ? { fingering } : { fingering, substitutionFingering };
   }
   function openFingeringTextInput() {
-    if (mode !== 'timeline' || pedalMode || ottavaMode || playback?.playing ||
+    if (!uiEditAllowed() || mode !== 'timeline' || pedalMode || ottavaMode || playback?.playing ||
       timelineCursor.focusedNoteId === null || timelineCursor.focusedPitchIndex === null ||
       selectedTimelineNotes.length !== 1 || getFocusedGrace(project.outline, timelineCursor)) return false;
     const focused = ScoreTimeline.note(project.outline, timelineCursor.focusedNoteId, timelineCursor.staff);
@@ -119,13 +149,13 @@
       noteId: focused.note.id,
       pitchIndex: timelineCursor.focusedPitchIndex,
       anchor,
-      value: pitch.fingering === undefined ? '' : `${pitch.fingering}${pitch.substitutionFingering === undefined ? '' : `-${pitch.substitutionFingering}`}`,
+      ...FloatingText.create(pitch.fingering === undefined ? '' : `${pitch.fingering}${pitch.substitutionFingering === undefined ? '' : `-${pitch.substitutionFingering}`}`),
     };
     keyHold.reset();
     return true;
   }
   function commitFingeringText(value: string) {
-    if (!fingeringTextInput) return;
+    if (!uiEditAllowed() || !fingeringTextInput) return;
     const parsed = parseFingeringInput(value);
     if (!parsed) return;
     const previousProject = project;
@@ -138,24 +168,24 @@
     recordProjectChange(previousProject);
   }
   function openSectionTextInput() {
-    if (mode !== 'outline') return false;
+    if (!uiEditAllowed() || mode !== 'outline') return false;
     const block = project.outline.find(entry => entry.id === outlineCursor.blockId);
     if (block?.type !== 'section') return false;
     const anchor = document.querySelector<HTMLElement>(`[data-block-id="${CSS.escape(block.id)}"]`);
     if (!anchor) return false;
-    sectionTextInput = { blockId: block.id, anchor, value: block.data.name };
+    sectionTextInput = { blockId: block.id, anchor, ...FloatingText.create(block.data.name) };
     keyHold.reset();
     return true;
   }
   function commitSectionText(value: string) {
-    if (!sectionTextInput) return;
+    if (!uiEditAllowed() || !sectionTextInput) return;
     const previousProject = project;
     project = OutlineEditor.renameSection(project, sectionTextInput.blockId, value);
     sectionTextInput = null;
     recordProjectChange(previousProject);
   }
   function openExpressionModal() {
-    if(mode!=='timeline'||pedalMode||ottavaMode)return;
+    if(!uiEditAllowed()||mode!=='timeline'||pedalMode||ottavaMode)return;
     const editor=NoteSettings.open(project,timelineCursor);
     if(!editor)return;
     noteSettings=editor;
@@ -164,7 +194,7 @@
   function closeExpressionModal() {noteSettings=null;keyHold.reset();}
   function closeMenu() { menuPath = null; keyHold.reset(); }
   function menuKey(key: string, path = menuPath) {
-    if (!path) return;
+    if (!uiEditAllowed() || !path) return;
     const previousProject = project;
     const ids = selectedTimelineNotes.map(entry => entry.note.id);
     const result = controlNoteMenu(path, key, createNoteMenuItems(project, ids));
@@ -198,6 +228,7 @@
     let disposed = false;
     void getCurrentWindow().onCloseRequested(event => {
       if (allowWindowClose) return;
+      if (!uiEditAllowed()) { event.preventDefault(); return; }
       const hasPendingChanges = projectIsDirty || noteSettings !== null || sectionTextInput !== null || fingeringTextInput !== null;
       if (!hasPendingChanges && !fileOperationInProgress) return;
       event.preventDefault();
@@ -240,6 +271,7 @@
     if (project !== previousProject) editorHistory.record(captureHistorySnapshot());
   }
   function restoreHistorySnapshot(snapshot: EditorHistorySnapshot) {
+    if (!uiEditAllowed()) return;
     project = snapshot.project;
     outlineCursor = { ...snapshot.outlineCursor };
     timelineCursor = { ...snapshot.timelineCursor };
@@ -260,7 +292,9 @@
     if (result.error) console.error('Project file operation failed:', result.error);
   }
   function restartApplication() {
+    if (!uiEditAllowed()) return;
     const restart = () => {
+      if (!uiEditAllowed()) return;
       if (import.meta.env.DEV || !isTauri()) {
         window.location.reload();
         return;
@@ -283,7 +317,7 @@
     }
   }
   async function saveProject(saveAs = false) {
-    if (fileOperationInProgress) return;
+    if (!uiEditAllowed() || fileOperationInProgress) return;
     if (!saveAs && currentProjectFile && !projectIsDirty) return;
     fileOperationInProgress = true;
     const result = saveAs || !currentProjectFile
@@ -299,6 +333,7 @@
     savedProjectFingerprint = result.value.fingerprint;
   }
   function applyLoadedProject(handle: ScoreProjectFileController.Handle, loadedProject: ScoreProject) {
+    if (!uiEditAllowed()) return;
     project = loadedProject;
     currentProjectFile = handle;
     savedProjectFingerprint = ScoreProjectFileController.fingerprint(loadedProject);
@@ -318,7 +353,7 @@
     editorHistory.reset(captureHistorySnapshot());
   }
   async function loadProject() {
-    if (fileOperationInProgress || playback?.playing) return;
+    if (!uiEditAllowed() || fileOperationInProgress || playback?.playing) return;
     fileOperationInProgress = true;
     const result = await ScoreProjectFileController.load();
     fileOperationInProgress = false;
@@ -341,6 +376,7 @@
     applyLoadedProject(handle, loadedProject);
   }
   function removeFocusedOutlineElement() {
+    if (!uiEditAllowed()) return;
     const previousProject = project;
     const result = OutlineEditor.remove(project, outlineCursor);
     if (result.project !== project) {
@@ -425,7 +461,14 @@
   }
 
   function handleKeydown(event: KeyboardEvent) {
-    if (mcpCheckout && !EditorDialogController.isOpen()) { event.preventDefault(); return; }
+    if (mcpCheckout && event.ctrlKey && event.shiftKey && !event.metaKey && !event.altKey && !event.isComposing && event.key.toLowerCase() === 'm') {
+      event.preventDefault();
+      if (!event.repeat) stopMcpEditing();
+      return;
+    }
+    if (!uiEditAllowed()) { event.preventDefault(); keyHold.reset(); return; }
+    if (EditorDialogController.controlKey(event)) { keyHold.reset(); return; }
+    if (sectionTextInput || fingeringTextInput) { controlFloatingText(event); return; }
     if (event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey && !event.isComposing && event.key.toLowerCase() === 'm') {
       event.preventDefault();
       if (!event.repeat) {
@@ -435,7 +478,6 @@
       }
       return;
     }
-    if (EditorDialogController.controlKey(event)) return;
     if(noteSettings){
       event.preventDefault();
       const previousProject = project;
@@ -671,8 +713,12 @@
 
 <svelte:window onkeydown={handleKeydown} onblur={closeMenu} />
 
-<div class="editor">
-  {#if mcpCheckout}<div class="mcp-checkout-blind" aria-hidden="true"></div>{/if}
+{#if mcpCheckout}
+  <div class="mcp-checkout-blind">
+    <button type="button" onclick={stopMcpEditing}>Stop MCP editing (Ctrl+Shift+M)</button>
+  </div>
+{/if}
+<div class="editor" inert={mcpCheckout}>
   <header class="app-header">
     <h1>CLAVIER<span>DESK</span></h1>
     <div class="mode-labels" aria-label="Editing modes">
@@ -718,22 +764,22 @@
   </main>
 </div>
 
-{#if menuPath && timelineCursor.focusedNoteId}
+{#if !mcpCheckout && menuPath && timelineCursor.focusedNoteId}
   <NoteMenu path={menuPath} noteId={timelineCursor.focusedNoteId} items={createNoteMenuItems(project, selectedTimelineNotes.map(entry => entry.note.id))}
     choose={(path) => menuKey('Enter', path)} close={closeMenu} />
 {/if}
-{#if sectionTextInput}
-  <FloatingTextInput anchor={sectionTextInput.anchor} value={sectionTextInput.value} maxLength={32} label="Section name"
-    onCommit={commitSectionText} onCancel={() => sectionTextInput = null} />
+{#if !mcpCheckout && sectionTextInput}
+  <FloatingTextInput anchor={sectionTextInput.anchor} draft={sectionTextInput} label="Section name"
+    onCancel={() => sectionTextInput = null} />
 {/if}
-{#if fingeringTextInput}
-  <FloatingTextInput anchor={fingeringTextInput.anchor} value={fingeringTextInput.value} maxLength={3} label="Piano fingering"
+{#if !mcpCheckout && fingeringTextInput}
+  <FloatingTextInput anchor={fingeringTextInput.anchor} draft={fingeringTextInput} label="Piano fingering"
     accept={(value) => parseFingeringInput(value) !== undefined}
-    onCommit={commitFingeringText} onCancel={() => fingeringTextInput = null} />
+    onCancel={() => fingeringTextInput = null} />
 {/if}
-{#if noteSettings}
+{#if !mcpCheckout && noteSettings}
   <ExpressionModal target={noteSettings.target} editor={noteSettings.expression}
-    tab={noteSettings.tab} changesEditor={noteSettings.changes} selectTab={(tab)=>{if(noteSettings)noteSettings={...noteSettings,tab};}}
+    tab={noteSettings.tab} changesEditor={noteSettings.changes} selectTab={(tab)=>{if(uiEditAllowed()&&noteSettings)noteSettings={...noteSettings,tab};}}
     note={ScoreTimeline.note(project.outline,noteSettings.target.noteId,noteSettings.target.staff)!.note} close={closeExpressionModal} />
 {/if}
 <EditorDialog />
@@ -757,7 +803,8 @@
     background: #c5dcd9;
   }
 
-  .mcp-checkout-blind { position: fixed; z-index: 9000; inset: 0; background: rgb(90 190 115 / 10%); pointer-events: none; }
+  .mcp-checkout-blind { position: fixed; z-index: 9000; inset: 0; background: rgb(90 190 115 / 10%); display: flex; align-items: flex-start; justify-content: center; padding: 12px; }
+  .mcp-checkout-blind button { padding: 8px 14px; border: 1px solid #397a70; border-radius: 3px; background: #fffef8; color: #263d43; font: inherit; cursor: pointer; }
 
   h1 {
     flex: 0 0 auto;

@@ -6,7 +6,8 @@ import type { McpBridgeRequest, McpBridgeResponse, McpCheckoutState } from './mc
 
 export type McpEditContext = { project: ScoreProject; timelineCursor: TimelineCursor };
 export type McpEditorPort = {
-  getEditorState(): unknown;
+  getEditorState(project: ScoreProject): unknown;
+  checkoutBlocker(): string | null;
   getEditContext(): McpEditContext;
   updateProject(previous: ScoreProject, next: ScoreProject): void;
   checkoutChanged(state: McpCheckoutState): void;
@@ -14,7 +15,7 @@ export type McpEditorPort = {
 
 namespace McpEditorController {
   export function create(port: McpEditorPort) {
-    let checkoutOwner: string | null = null;
+    let checkout: { id: string; owner: string; baseline: ScoreProject; project: ScoreProject; timelineCursor: TimelineCursor } | null = null;
 
     function applyEdit(params: Record<string, unknown>) {
       const { operation, noteId, staff, pitchIndex, fingering, substitutionFingering } = params;
@@ -27,7 +28,7 @@ namespace McpEditorController {
             substitution > 5 || substitution === fingering))) {
         return { error: { code: 'INVALID_ARGUMENT', message: 'Provide operation set_pitch_fingering, noteId, staff, pitchIndex, fingering (1–5), and optional distinct substitutionFingering (1–5).' } };
       }
-      const { project, timelineCursor } = port.getEditContext();
+      const { project, timelineCursor } = checkout!;
       const located = ScoreTimeline.note(project.outline, noteId, staff as PianoStaffName);
       if (!located || pitchIndex < 0 || pitchIndex >= located.note.pitches.length) {
         return { error: { code: 'TARGET_NOT_FOUND', message: 'The note or pitch index does not exist on the requested staff.' } };
@@ -36,7 +37,7 @@ namespace McpEditorController {
         focusedNoteId: noteId, focusedPitchIndex: pitchIndex };
       const next = NoteEditor.setPitchFingering(project, cursor, fingering as PianoFingering,
         substitution as PianoFingering | undefined);
-      port.updateProject(project, next);
+      checkout!.project = next;
       return { result: { changed: next !== project, noteId, staff, voiceIndex: located.voiceIndex,
         pitchIndex, fingering, substitutionFingering: substitution ?? null } };
     }
@@ -51,21 +52,37 @@ namespace McpEditorController {
         const owner = typeof params?.ownerId === 'string' ? params.ownerId : '';
         if (!owner) return { id: request.id, error: { code: 'INVALID_OWNER', message: 'A checkout owner is required.' } };
         if (request.method === 'beginCheckout') {
-          if (checkoutOwner && checkoutOwner !== owner) return { id: request.id, error: { code: 'CHECKOUT_BUSY', message: 'Another MCP client owns the checkout.' } };
-          checkoutOwner = owner;
+          if (checkout && checkout.owner !== owner) return { id: request.id, error: { code: 'CHECKOUT_BUSY', message: 'Another MCP client owns the checkout.' } };
+          if (checkout) return { id: request.id, result: { status: 'checked_out', checkoutId: checkout.id } };
+          const blocker = port.checkoutBlocker();
+          if (blocker) return { id: request.id, error: { code: 'EDITOR_BUSY', message: blocker } };
+          const context = port.getEditContext();
+          checkout = { id: crypto.randomUUID(), owner, baseline: context.project, project: context.project,
+            timelineCursor: { ...context.timelineCursor } };
           port.checkoutChanged({ active: true, completed: false });
-          return { id: request.id, result: { status: 'checked_out' } };
+          return { id: request.id, result: { status: 'checked_out', checkoutId: checkout.id } };
         }
-        if (checkoutOwner !== owner) return { id: request.id, error: { code: 'CHECKOUT_REQUIRED', message: 'This MCP client does not own the checkout.' } };
-        if (request.method === 'getEditorState') return { id: request.id, result: port.getEditorState() };
+        if (!checkout || checkout.owner !== owner || params.checkoutId !== checkout.id) {
+          return { id: request.id, error: { code: 'CHECKOUT_REQUIRED', message: 'An active checkoutId owned by this MCP client is required.' } };
+        }
+        if (request.method === 'getEditorState') return { id: request.id, result: port.getEditorState(checkout.project) };
         if (request.method === 'applyEdit') {
           const result = applyEdit(params);
           return result.error ? { id: request.id, error: result.error } : { id: request.id, result: result.result };
         }
+        if (port.getEditContext().project !== checkout.baseline) {
+          return { id: request.id, error: { code: 'PROJECT_CHANGED', message: 'The project changed during checkout. Stop this checkout and start again.' } };
+        }
+        const changed = checkout.project !== checkout.baseline;
+        if (changed) port.updateProject(checkout.baseline, checkout.project);
+        checkout = null;
         port.checkoutChanged({ active: false, completed: true });
-        return { id: request.id, result: { status: 'completed' } };
+        return { id: request.id, result: { status: 'completed', changed } };
       },
-      releaseCheckout() { checkoutOwner = null; },
+      releaseCheckout() {
+        checkout = null;
+        port.checkoutChanged({ active: false, completed: false });
+      },
     };
   }
 }

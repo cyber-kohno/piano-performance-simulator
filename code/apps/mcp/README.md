@@ -2,7 +2,9 @@
 
 ローカルのエージェント向けstdio MCPサーバー。Scorehackの接続実装を基にしています。アプリとは別のプロセスで起動し、GUIの起動・停止にかかわらずツール一覧は固定です。
 
-要件・実装構成・検証結果・別環境での再開については、[MCP開発の引継ぎ資料](../../../docs/plan/mcp/handoff.md)を参照してください。
+接続基盤については[MCP開発の引継ぎ資料](../../../docs/plan/mcp/handoff.md)、現在の編集・排他仕様については[チェックアウトとUI入力](../../../docs/plan/mcp/checkout-and-ui.md)を参照してください。
+
+次段階は、空からまとまった譜面を構築してGUIで確認するMVPです。[要件・設計方針・別環境への引継ぎ](../../../docs/plan/mcp/score-authoring-mvp-handoff.md)を再開入口にしてください。新規構築操作・操作配列はまだ実装していません。
 
 ## ビルドと登録
 
@@ -34,8 +36,16 @@ cargo build --release
 | `ping` | MCPサーバー単体の疎通。GUI不要。 |
 | `list_clavierdesk_sessions` | 公開中かつ認証付き生存確認に成功したセッションのID・PID・公開開始時刻。 |
 | `probe_session(sessionId)` | 指定セッションのWebViewまで疎通確認。 |
+| `begin_checkout(sessionId)` | 編集権取得とUIロック。返された`checkoutId`を以降の要求に使う。 |
+| `get_editor_state(sessionId, checkoutId)` | 作業用の譜面・カーソル・選択・未保存状態を取得。 |
+| `apply_edit(sessionId, checkoutId, …)` | 作業用データに編集を蓄積。現在は`set_pitch_fingering`のみ。 |
+| `finish_checkout(sessionId, checkoutId)` | 全編集を一度だけ実プロジェクト・Undo履歴に反映し、所有権とUIロックを解除。その後で完了通知。 |
 
-このMVPは接続のみを扱います。譜面・カーソル・選択範囲・編集中の下書きは取得せず、編集・保存・再生も行いません。MCP世代の管理は導入していません。
+入力の下書き、メニュー、ダイアログ、ファイル操作、再生がある間は`EDITOR_BUSY`でチェックアウトを拒否します。下書きを自動確定・破棄しません。
+
+チェックアウト中は、画面の`Stop MCP editing`ボタンまたはCtrl＋Shift＋Mで強制停止できます。未反映の編集を破棄し、UIロックを解除してから通知します。以前の`checkoutId`は無効になり、同じエージェントが再チェックアウトしても遅延要求を拒否します。反映後の変更はUndoで戻します。
+
+編集ツールの`changed`は作業用データの変更を表します。実プロジェクトへの反映は`finish_checkout`で行い、自動保存はしません。汎用の操作配列・条件クエリ・全構造検証、MCP世代管理は未追加です。GUIとMCPサーバーを同じソースからビルドし、ツールスキーマ変更後はMCPクライアントを再接続してください。
 
 ## 接続方式
 

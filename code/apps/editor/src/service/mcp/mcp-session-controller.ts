@@ -43,6 +43,7 @@ export function create(port: McpSessionPort, update: (state: McpSessionState) =>
       try {
         // Also clears a bridge left behind by a WebView reload.
         await port.stopSession();
+        editor.releaseCheckout();
         if (stopping) {
           publish({ status: 'stopped', details: null, error: null });
           return;
@@ -50,7 +51,9 @@ export function create(port: McpSessionPort, update: (state: McpSessionState) =>
         if (disposed) return;
         if (!unlisten) unlisten = await port.onRequest(request => {
           if (disposed) return;
-          const response = editor.handle(request);
+          let response: McpBridgeResponse;
+          try { response = editor.handle(request); }
+          catch (error) { response = { id: request.id, error: { code: 'INTERNAL_ERROR', message: String(error) } }; }
           void port.respond(response).catch(error => console.error('Failed to respond to MCP request:', error));
         });
         if (disposed) return;
@@ -64,6 +67,7 @@ export function create(port: McpSessionPort, update: (state: McpSessionState) =>
         try { await port.stopSession(); } catch (cleanupError) {
           message += `; session cleanup failed: ${String(cleanupError)}`;
         }
+        editor.releaseCheckout();
         publish({ status: 'error', details: null, error: message });
       }
     }
@@ -72,6 +76,7 @@ export function create(port: McpSessionPort, update: (state: McpSessionState) =>
       async initialize() {
         if (disposed || operation) return;
         operation = port.stopSession().then(() => {
+          editor.releaseCheckout();
           publish({ status: 'stopped', details: null, error: null });
         }).catch(error => {
           publish({ status: 'error', details: null, error: String(error) });
@@ -83,7 +88,7 @@ export function create(port: McpSessionPort, update: (state: McpSessionState) =>
       async dispose() {
         disposed = true;
         await operation;
-        try { await port.stopSession(); } finally { unlisten?.(); unlisten = undefined; }
+        try { await port.stopSession(); } finally { editor.releaseCheckout(); unlisten?.(); unlisten = undefined; }
       },
     };
   }

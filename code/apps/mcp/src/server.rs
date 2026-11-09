@@ -25,9 +25,21 @@ struct SessionRequest {
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
+struct CheckoutRequest {
+    session_id: String,
+    #[schemars(
+        description = "checkoutId returned by begin_checkout. Invalid after completion or forced stop."
+    )]
+    checkout_id: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
 struct ApplyEditRequest {
     #[schemars(description = "Complete sessionId returned by list_clavierdesk_sessions.")]
     session_id: String,
+    #[schemars(description = "checkoutId returned by begin_checkout.")]
+    checkout_id: String,
     #[schemars(description = "Currently supported operation: set_pitch_fingering.")]
     operation: String,
     note_id: String,
@@ -84,7 +96,7 @@ impl ClavierDeskMcpServer {
     }
 
     #[tool(
-        description = "Begin an exclusive ClavierDesk edit checkout. The app locks keyboard input until finish_checkout is called and the user dismisses the completion notice."
+        description = "Begin an exclusive ClavierDesk edit checkout. Returns checkoutId, required for all checkout requests. Refused while a draft, menu, dialog, file operation, or playback is active. UI editing is locked; changes are staged until finish_checkout."
     )]
     async fn begin_checkout(
         &self,
@@ -103,16 +115,16 @@ impl ClavierDeskMcpServer {
     }
 
     #[tool(
-        description = "Finish the current ClavierDesk checkout. The app shows a completion notice and keeps keyboard input locked until the user dismisses it."
+        description = "Commit all staged changes once, release the checkout and unlock UI editing, then show a completion notice. A forced stop invalidates checkoutId and discards staged changes."
     )]
     async fn finish_checkout(
         &self,
-        Parameters(request): Parameters<SessionRequest>,
+        Parameters(request): Parameters<CheckoutRequest>,
     ) -> Result<CallToolResult, McpError> {
         match bridge::call_session(
             &request.session_id,
             "finishCheckout",
-            checkout_params(&request.session_id),
+            json!({ "ownerId": std::process::id().to_string(), "checkoutId": request.checkout_id }),
         ) {
             Ok(value) => Ok(result(value)),
             Err(error) => Ok(CallToolResult::error(vec![ContentBlock::text(
@@ -122,16 +134,16 @@ impl ClavierDeskMcpServer {
     }
 
     #[tool(
-        description = "Read the current unsaved ClavierDesk score and editor state. Requires an active checkout owned by this MCP process."
+        description = "Read the checkout's staged score and editor state. Requires checkoutId from begin_checkout, owned by this MCP process."
     )]
     async fn get_editor_state(
         &self,
-        Parameters(request): Parameters<SessionRequest>,
+        Parameters(request): Parameters<CheckoutRequest>,
     ) -> Result<CallToolResult, McpError> {
         match bridge::call_session(
             &request.session_id,
             "getEditorState",
-            checkout_params(&request.session_id),
+            json!({ "ownerId": std::process::id().to_string(), "checkoutId": request.checkout_id }),
         ) {
             Ok(value) => Ok(result(value)),
             Err(error) => Ok(CallToolResult::error(vec![ContentBlock::text(
@@ -141,13 +153,13 @@ impl ClavierDeskMcpServer {
     }
 
     #[tool(
-        description = "Apply a validated semantic edit to the unsaved score. Requires an active checkout owned by this MCP process. Supported operation: set_pitch_fingering, targeting a pitch by noteId, staff, and pitchIndex."
+        description = "Stage a validated semantic edit without changing the live score. Requires checkoutId from begin_checkout. Call finish_checkout to commit all staged edits once. Supported operation: set_pitch_fingering, targeting a pitch by noteId, staff, and pitchIndex."
     )]
     async fn apply_edit(
         &self,
         Parameters(request): Parameters<ApplyEditRequest>,
     ) -> Result<CallToolResult, McpError> {
-        let params = json!({ "ownerId": std::process::id().to_string(), "operation": request.operation, "noteId": request.note_id, "staff": request.staff, "pitchIndex": request.pitch_index, "fingering": request.fingering, "substitutionFingering": request.substitution_fingering });
+        let params = json!({ "ownerId": std::process::id().to_string(), "checkoutId": request.checkout_id, "operation": request.operation, "noteId": request.note_id, "staff": request.staff, "pitchIndex": request.pitch_index, "fingering": request.fingering, "substitutionFingering": request.substitution_fingering });
         match bridge::call_session(&request.session_id, "applyEdit", params) {
             Ok(value) => Ok(result(value)),
             Err(error) => Ok(CallToolResult::error(vec![ContentBlock::text(
@@ -165,7 +177,7 @@ impl ServerHandler for ClavierDeskMcpServer {
                 Implementation::new(env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"))
                     .with_title("ClavierDesk MCP"),
             )
-            .with_instructions("Use list_clavierdesk_sessions to discover sessions published with Ctrl+M in ClavierDesk. Match the complete sessionId to the ID shown in the app and pass it to every session tool. Call begin_checkout before reading editor state. get_editor_state returns the current unsaved score and editor context for the checkout owner. Call finish_checkout when the work is complete; the app remains keyboard-locked until the user dismisses the completion dialog.".to_string())
+            .with_instructions("Use list_clavierdesk_sessions to discover sessions published with Ctrl+M in ClavierDesk. Pass the complete sessionId to each session tool. Call begin_checkout and pass its checkoutId to get_editor_state, apply_edit, and finish_checkout. Edits are staged; finish_checkout commits once and unlocks UI before displaying a notice. The user can force stop via Ctrl+Shift+M or the Stop MCP editing button, discarding staged edits and invalidating checkoutId. Do not retry old requests with a new checkoutId; re-read the score after a new checkout.".to_string())
     }
 }
 

@@ -30,14 +30,14 @@ pub struct SessionSummary {
 
 #[derive(Debug)]
 pub struct BridgeError {
-    pub code: &'static str,
+    pub code: String,
     pub message: String,
 }
 
 impl BridgeError {
-    fn new(code: &'static str, message: impl Into<String>) -> Self {
+    fn new(code: impl Into<String>, message: impl Into<String>) -> Self {
         Self {
-            code,
+            code: code.into(),
             message: message.into(),
         }
     }
@@ -218,7 +218,10 @@ pub fn call_session(session_id: &str, method: &str, params: Value) -> Result<Val
     }
     let error = response.get("error");
     Err(BridgeError::new(
-        "BRIDGE_ERROR",
+        error
+            .and_then(|value| value.get("code"))
+            .and_then(Value::as_str)
+            .unwrap_or("BRIDGE_ERROR"),
         error
             .and_then(|value| value.get("message"))
             .and_then(Value::as_str)
