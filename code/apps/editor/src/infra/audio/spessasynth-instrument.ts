@@ -1,6 +1,7 @@
-import { WorkletSynthesizer } from 'spessasynth_lib';
+import { Sequencer, WorkletSynthesizer } from 'spessasynth_lib';
 import processorUrl from 'spessasynth_lib/dist/spessasynth_processor.min.js?url';
 import type { PlaybackInstrumentPort } from '../../service/playback/playback-instrument.ts';
+import { createWorkletSequencePlayer } from './worklet-sequence-player.ts';
 
 const SOUND_FONT_URL = '/assets/soundfonts/clavierdesk-grand-piano.sf2';
 const SOUND_FONT_ID = 'clavierdesk-grand-piano';
@@ -28,47 +29,41 @@ namespace SpessaSynthInstrument {
       await synth.isReady;
       synth.programChange(0, 0);
 
-      let generation = 0;
-      const noteOffTimers = new Set<number>();
-      const activePitchCounts = new Map<number, number>();
-      const stop = () => {
-        generation++;
-        for (const timer of noteOffTimers) window.clearTimeout(timer);
-        noteOffTimers.clear();
-        activePitchCounts.clear();
-        synth.controllerChange(0, 64 as Parameters<typeof synth.controllerChange>[1], 0);
-        synth.stopAll(true);
-      };
+      const sequencer = new Sequencer(synth, { skipToFirstNoteOn: false });
+      sequencer.loopCount = 0;
+      sequencer.eventHandler.timeDelay = 0;
+      const player = createWorkletSequencePlayer({
+        resume: () => context.resume(),
+        load: binary => sequencer.loadNewSongList([{ binary }]),
+        play: () => { sequencer.currentTime = 0; sequencer.play(); },
+        pause: () => sequencer.pause(),
+        get currentTime() { return sequencer.currentTime; },
+        silence() {
+          for (let channel = 0; channel < 16; channel++) synth.controllerChange(channel, 64, 0);
+          synth.stopAll(true);
+        },
+      });
+      sequencer.eventHandler.addEvent('songChange', 'clavierdesk', () => player.loaded());
+      sequencer.eventHandler.addEvent('songEnded', 'clavierdesk', () => player.ended());
+      sequencer.eventHandler.addEvent('midiError', 'clavierdesk', error => player.failed(error));
       return {
+        startSequence: (sequence, callbacks) => player.startSequence(sequence, callbacks),
         play(pitches, velocity, durationMs) {
-          const currentGeneration = generation;
-          void context.resume().then(() => {
-            if (currentGeneration !== generation) return;
-            for (const midi of pitches) {
-              activePitchCounts.set(midi, (activePitchCounts.get(midi) ?? 0) + 1);
-              synth.noteOn(0, midi, velocity);
-            }
-            const timer = window.setTimeout(() => {
-              if (currentGeneration !== generation) return;
-              for (const midi of pitches) {
-                const count = activePitchCounts.get(midi) ?? 0;
-                if (count <= 1) {
-                  activePitchCounts.delete(midi);
-                  synth.noteOff(0, midi);
-                } else activePitchCounts.set(midi, count - 1);
-              }
-              noteOffTimers.delete(timer);
-            }, durationMs);
-            noteOffTimers.add(timer);
-          }).catch((error: unknown) => console.error('Audio preview:', error));
+          const durationSeconds = Math.max(0.001, durationMs / 1000);
+          player.startSequence({ durationSeconds, pedalInitiallyDown: false, pedalEvents: [], events: [
+            { sourceNoteId: 'preview', startSeconds: 0, durationSeconds, pitches: [...pitches] },
+          ] }, { ended: () => {}, failed: error => console.error('Audio preview:', error) }, velocity);
         },
         setSustainPedal(down) {
           void context.resume().then(() => synth.controllerChange(0, 64 as Parameters<typeof synth.controllerChange>[1], down ? 127 : 0))
             .catch((error: unknown) => console.error('Sustain pedal:', error));
         },
-        stop,
+        stop: player.stop,
         dispose() {
-          stop();
+          player.stop();
+          sequencer.eventHandler.removeEvent('songChange', 'clavierdesk');
+          sequencer.eventHandler.removeEvent('songEnded', 'clavierdesk');
+          sequencer.eventHandler.removeEvent('midiError', 'clavierdesk');
           synth.destroy();
           void context.close();
         },

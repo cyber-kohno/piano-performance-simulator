@@ -11,6 +11,7 @@ namespace NotePreview {
 
   export function create(instrument: PlaybackInstrumentPort): Value {
     return {
+      startSequence: (sequence, callbacks) => instrument.startSequence(sequence, callbacks),
       play: (pitches, velocity, durationMs) => instrument.play(pitches, velocity, durationMs),
       setSustainPedal: down => instrument.setSustainPedal(down),
       stop: () => instrument.stop(),

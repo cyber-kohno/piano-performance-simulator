@@ -8,7 +8,8 @@
   let message = $state<string | null>(null);
   let paintSelection = $state<((ids: readonly string[]) => void) | null>(null);
   $effect(() => { paintSelection?.(selectedNoteIds); });
-  const preview = $derived(PreviewMusicXml.create(outline, activeIndex, trills, tempoChanges, clefChanges, slurs, dynamicChanges));
+  const prepared = $derived(PreviewMusicXml.prepare(outline));
+  const preview = $derived(PreviewMusicXml.create(outline, activeIndex, trills, tempoChanges, clefChanges, slurs, dynamicChanges, prepared));
   $effect(() => {
     const target=host, document=preview;
     paintSelection=null;

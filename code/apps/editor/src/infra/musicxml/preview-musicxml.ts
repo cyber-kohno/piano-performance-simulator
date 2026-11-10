@@ -58,10 +58,25 @@ namespace PreviewMusicXml {
     return initial || substitution ? `<technical>${initial}${substitution}</technical>` : '';
   }
 
-  export function create(outline: ScoreProject['outline'], activeIndex: number, trills: ScoreProject['trills'] = [], tempoChanges: ScoreProject['tempoChanges'] = [], clefChanges: ScoreProject['clefChanges'] = [], slurs: ScoreProject['slurs'] = [], dynamicChanges: ScoreProject['dynamicChanges'] = []) {
+  export function prepare(outline: ScoreProject['outline']) {
     const measures = outline.filter((block) => block.type === 'measure');
+    const starts: number[] = [];
+    const incomingPedal: boolean[] = [];
+    let position = 0, pedalDown = false;
+    for (const measure of measures) {
+      starts.push(position);
+      incomingPedal.push(pedalDown);
+      position += measure.data.length.cnt / measure.data.length.unit * 16;
+      for (const event of [...(measure.data.pedalEvents ?? [])].sort((a, b) => MusicalTime.compare(a.offset, b.offset))) {
+        pedalDown = event.action !== 'stop';
+      }
+    }
+    return { measures, starts, incomingPedal, sectionNameByMeasure: sectionMarkers(outline), keys: ScoreKey.buildMeasureCache(outline) };
+  }
+
+  export function create(outline: ScoreProject['outline'], activeIndex: number, trills: ScoreProject['trills'] = [], tempoChanges: ScoreProject['tempoChanges'] = [], clefChanges: ScoreProject['clefChanges'] = [], slurs: ScoreProject['slurs'] = [], dynamicChanges: ScoreProject['dynamicChanges'] = [], prepared = prepare(outline)) {
+    const { measures, starts, incomingPedal, sectionNameByMeasure, keys } = prepared;
     if (activeIndex < 0 || activeIndex >= measures.length) return null;
-    const sectionNameByMeasure = sectionMarkers(outline);
     const firstIndex = Math.max(0, activeIndex - 1);
     const visible = measures.slice(firstIndex, activeIndex + 2);
     const visibleIds = new Set(visible.flatMap((measure) => [measure.data.upperStaff, measure.data.lowerStaff]
@@ -117,15 +132,10 @@ namespace PreviewMusicXml {
         .reduce((value, event) => MusicalTime.lcm(value, event.offset.denominator), resolution), noteResolution);
     // A preview is only a window into the score. Reconstruct its incoming pedal state
     // without inserting events into the saved project.
-    let pedalDown = false;
+    let pedalDown = incomingPedal[firstIndex];
     const pedals: PreviewPedalEvent[] = [];
-    for (const measure of measures.slice(0, firstIndex)) {
-      for (const event of [...(measure.data.pedalEvents ?? [])].sort((a, b) => MusicalTime.compare(a.offset, b.offset))) {
-        pedalDown = event.action !== 'stop';
-      }
-    }
     const ottavas: PreviewOttavaEvent[] = [];
-    const visibleStart = measures.slice(0, firstIndex).reduce((sum, measure) => sum + measure.data.length.cnt / measure.data.length.unit * 16, 0);
+    const visibleStart = starts[firstIndex];
     const visibleEnd = visibleStart + visible.reduce((sum, measure) => sum + measure.data.length.cnt / measure.data.length.unit * 16, 0);
     const visibleOttavaEvents = ottavaEvents.filter(event => event.position >= visibleStart && event.position <= visibleEnd);
     for (const staff of ['upperStaff', 'lowerStaff'] as const) {
@@ -158,9 +168,9 @@ namespace PreviewMusicXml {
     const content = visible.map((measure, index) => {
       const length = measure.data.length.cnt / measure.data.length.unit * 16;
       const irregular = length !== initial.timeSignature.cnt / initial.timeSignature.unit * 16;
-      const measureStart = measures.slice(0, firstIndex + index).reduce((sum, block) => sum + block.data.length.cnt / block.data.length.unit * 16, 0);
-      const measureKey = ScoreKey.forBlock(outline, measure.id);
-      const previousKey = firstIndex + index > 0 ? ScoreKey.forBlock(outline, measures[firstIndex + index - 1].id) : initial.keySignature;
+      const measureStart = starts[firstIndex + index];
+      const measureKey = keys.get(measure.id)!.keySignature;
+      const previousKey = firstIndex + index > 0 ? keys.get(measures[firstIndex + index - 1].id)!.keySignature : initial.keySignature;
       let body = index === 0 ? `<attributes><divisions>${ticksPerSixteenth * 4}</divisions><key><fifths>${measureKey.fifths}</fifths></key>` +
         `<time><beats>${initial.timeSignature.cnt}</beats><beat-type>${initial.timeSignature.unit}</beat-type></time>` +
         '<staves>2</staves>' + clefXml(ScoreClef.at(clefProject, 'upperStaff', measureStart), 1) + clefXml(ScoreClef.at(clefProject, 'lowerStaff', measureStart), 2) + '</attributes>' : '';
@@ -196,7 +206,7 @@ namespace PreviewMusicXml {
       }
       const localTempos = tempos.filter(change => change.measureId === measure.id);
       if (index === 0 && !localTempos.some(change => change.localPosition === 0)) {
-        const firstStart = measures.slice(0, firstIndex).reduce((sum, block) => sum + block.data.length.cnt / block.data.length.unit * 16, 0);
+        const firstStart = visibleStart;
         body += tempoDirection(ScoreTempo.at(tempoProject, firstStart), 0);
       }
       for (const change of localTempos) body += tempoDirection(change.bpm, change.localPosition);

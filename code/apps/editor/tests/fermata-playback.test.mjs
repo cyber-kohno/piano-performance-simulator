@@ -120,22 +120,24 @@ test('graces, arpeggio preroll, staccato and per-pitch slur releases use the sam
   assert.deepEqual(stretched, snapshot);
 });
 
-test('transport schedules slowed audio and advances the playhead with the same clock before, within and after the hold', t => {
-  const oldWindow = globalThis.window, timers = new Map();
-  let id = 0, interval, now = 0;
-  globalThis.window = { setTimeout(fn, delay) { timers.set(++id, { fn, delay }); return id; },
-    clearTimeout(key) { timers.delete(key); }, setInterval(fn) { interval = fn; return ++id; }, clearInterval() { interval = undefined; } };
-  t.mock.method(performance, 'now', () => now);
-  const positions = [], played = [];
-  const player = Playback.create({ play: (...args) => played.push(args), stop() {}, setSustainPedal() {} });
+test('transport passes slowed events to audio and follows the audio clock across the hold', t => {
+  const oldWindow = globalThis.window;
+  let id = 0, interval, now = 0, sequence;
+  globalThis.window = { setTimeout() { throw new Error('Audio must not use UI timers'); },
+    setInterval(fn) { interval = fn; return ++id; }, clearInterval() { interval = undefined; } };
+  const positions = [];
+  const player = Playback.create({ startSequence(plan) {
+    sequence = plan;
+    return { get currentTime() { return now / 1000; } };
+  }, stop() {} });
   t.after(() => { player.dispose(); globalThis.window = oldWindow; });
   const p = fixture(); upper(p)[1].fermata = { lengthRatio: 2 };
   player.prepare(p); player.start(p, 0, position => positions.push(position), () => {});
-  const atSecondNote = [...timers.values()].find(timer => timer.delay === 500);
-  atSecondNote.fn(); assert.equal(played[0][0][0], 62);
-  assert.ok(played[0][2] > 900); // Stretched articulation gap remains attached to the release.
+  const secondNote = sequence.events.find(event => event.startSeconds === 0.5);
+  assert.equal(secondNote.pitches[0], 62);
+  assert.ok(secondNote.durationSeconds > 0.9);
   for (const [milliseconds, position] of [[250, 2], [500, 4], [1000, 6], [1500, 8], [1750, 10], [2000, 12]]) {
     now = milliseconds; interval(); near(positions.at(-1), position);
   }
-  assert.ok([...timers.values()].some(timer => timer.delay === 2500), 'auto-stop includes the extension');
+  near(sequence.durationSeconds, 2.5);
 });

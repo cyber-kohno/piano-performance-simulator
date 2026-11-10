@@ -4,6 +4,7 @@
   import { onDestroy } from 'svelte';
   import type { ScoreProject } from "../domain/score/types.ts";
   import type { OutlineCursor } from '../state/outline-cursor';
+  import { getSelectedOutlineBlocks } from '../state/outline-cursor';
   import { getMeasureBeatDisplay } from '../state/measure-beats';
   import InitialValues from './InitialValues.svelte';
 
@@ -17,6 +18,8 @@
   } = $props();
 
   const initialValues = $derived(outline[0].data);
+  const selectedBlocks = $derived(getSelectedOutlineBlocks(outline, cursor));
+  const selectedBlockIds = $derived(new Set(selectedBlocks.length > 1 ? selectedBlocks.map(block => block.id) : []));
   let blocksViewport: HTMLDivElement;
   let scrollTimers: number[] = [];
 
@@ -73,6 +76,7 @@
         {#if block.type === 'init'}
           <section
             class="initial-block"
+            class:range-selected={selectedBlockIds.has(block.id)}
             data-block-id={block.id}
             class:focused={cursor.blockId === block.id}
             aria-label="Initial values block"
@@ -84,6 +88,7 @@
         {:else if block.type === 'section'}
           <section
             class="section-block"
+            class:range-selected={selectedBlockIds.has(block.id)}
             data-block-id={block.id}
             class:focused={cursor.blockId === block.id}
             aria-label={`Section ${block.data.name}`}
@@ -93,6 +98,7 @@
           </section>
         {:else if block.type === 'key-change'}
           <section class="key-change-block" data-block-id={block.id} class:focused={cursor.blockId === block.id}
+            class:range-selected={selectedBlockIds.has(block.id)}
             aria-label="Key signature change" aria-current={cursor.blockId === block.id ? 'true' : undefined}>
             <h3>Key Change</h3>
             <InitialValues values={{ ...initialValues, keySignature: block.data.keySignature }} keyOnly
@@ -102,6 +108,7 @@
           {@const beats = getMeasureBeatDisplay(initialValues.timeSignature, block.data.length)}
           <section
             class="measure-block"
+            class:range-selected={selectedBlockIds.has(block.id)}
             data-block-id={block.id}
             class:focused={cursor.blockId === block.id}
             aria-label={`Measure ${getMeasureNumber(block.id)}`}
@@ -251,4 +258,14 @@
     content: '';
     pointer-events: none;
   }
+  .range-selected { position: relative; isolation: isolate; }
+  .range-selected::after {
+    position: absolute;
+    z-index: 1;
+    inset: 0;
+    background: rgba(239, 68, 68, 0.23);
+    content: '';
+    pointer-events: none;
+  }
+  .range-selected.focused::after { background: rgba(239, 68, 68, 0.32); }
 </style>

@@ -70,23 +70,34 @@ test('prepared ornaments preserve preroll at a fresh start and trim attacks on l
 
 test('transport reuses preparation and plans, invalidates edits and converts progress without rescanning the score', t => {
   const oldWindow = globalThis.window;
-  const timeouts = new Map(); let interval, id = 0, now = 0, builds = 0, plans = 0;
-  globalThis.window = { setTimeout(fn, delay) { timeouts.set(++id, { fn, delay }); return id; },
-    clearTimeout(key) { timeouts.delete(key); }, setInterval(fn) { interval = fn; return ++id; }, clearInterval() { interval = undefined; } };
-  t.mock.method(performance, 'now', () => now);
+  let interval, id = 0, now = 0, builds = 0, plans = 0;
+  globalThis.window = { setTimeout() { throw new Error('Audio must not use UI timers'); },
+    setInterval(fn) { interval = fn; return ++id; }, clearInterval() { interval = undefined; } };
+  t.mock.method(performance, 'now', () => 999999); // Wall clock cannot advance audio.
   const prepare = Plan.prepare;
   t.mock.method(Plan, 'prepare', project => {
     builds++; const snapshot = prepare(project);
     return { ...snapshot, create(position) { plans++; return snapshot.create(position); } };
   });
-  const positions = [], player = Playback.create({ play() {}, stop() {}, setSustainPedal() {} });
+  let callbacks;
+  const positions = [], player = Playback.create({
+    startSequence(sequence, handlers) {
+      callbacks = handlers;
+      const start = now;
+      return { get currentTime() { return (now - start) / 1000; } };
+    }, stop() {},
+  });
   t.after(() => { player.dispose(); globalThis.window = oldWindow; });
   const p = fixture();
   player.prepare(p);
   player.start(p, 0, position => positions.push(position), () => {});
   const anchors = t.mock.method(Tempo, 'anchors', () => { throw new Error('Progress must not scan tempo anchors'); });
   now = 250; interval(); near(positions.at(-1), 2);
+  now = 300;
+  near(player.position, 2.4); // Stop can sample the clock between UI progress frames.
+  near(positions.at(-1), 2);
   player.stop();
+  assert.equal(player.position, null);
   player.start(p, 0, () => {}, () => {}); player.stop();
   assert.equal(builds, 1); assert.equal(plans, 1);
   anchors.mock.restore();
@@ -95,6 +106,8 @@ test('transport reuses preparation and plans, invalidates edits and converts pro
   player.start(edited, 0, position => positions.push(position), () => {});
   // start position is reported synchronously, without a pending progress frame.
   near(positions.at(-1), 0);
-  now = 500; interval(); near(positions.at(-1), 1);
+  now = 550; interval(); near(positions.at(-1), 1);
   assert.equal(builds, 2); assert.equal(plans, 2);
+  callbacks.ended();
+  assert.equal(player.playing, false);
 });

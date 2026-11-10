@@ -5,6 +5,7 @@ import type { ScoreProject } from '../../domain/score/types.ts';
 namespace ScorePlayback {
   export type Value = {
     readonly playing: boolean;
+    readonly position: number | null;
     prepare(project: ScoreProject): void;
     start(project: ScoreProject, startPosition: number, onPosition: (position: number) => void, onStop: () => void): boolean;
     stop(): void;
@@ -14,17 +15,16 @@ namespace ScorePlayback {
   export function create(instrument: PlaybackInstrumentPort): Value {
     let playing = false;
     let generation = 0;
-    let timers: number[] = [];
     let progressTimer: number | undefined;
     let onPosition: ((position: number) => void) | undefined;
     let onStop: (() => void) | undefined;
-    let plan: ReturnType<typeof ScorePlaybackPlan.create> | undefined;
-    let startedAt = 0;
     let preparedProject: ScoreProject | undefined;
     let prepared: ReturnType<typeof ScorePlaybackPlan.prepare> | undefined;
     let cachedPlan: ReturnType<typeof ScorePlaybackPlan.create> | undefined;
+    let positionNow: (() => number) | undefined;
     const value: Value = {
       get playing() { return playing; },
+      get position() { return playing ? positionNow?.() ?? null : null; },
       prepare(project) {
         if (preparedProject === project) return;
         prepared = ScorePlaybackPlan.prepare(project);
@@ -38,46 +38,33 @@ namespace ScorePlayback {
         const nextPlan = cachedPlan?.startPosition === startPosition ? cachedPlan : snapshot.create(startPosition);
         cachedPlan = nextPlan;
         if (nextPlan.durationSeconds <= 0 || nextPlan.events.length === 0) return false;
-        instrument.stop();
-        plan = nextPlan;
         onPosition = updatePosition;
         onStop = stopped;
         playing = true;
         const session = ++generation;
-        startedAt = performance.now();
         const startSeconds = snapshot.clock.secondsAt(nextPlan.startPosition);
-        instrument.setSustainPedal(nextPlan.pedalInitiallyDown);
+        try {
+          const run = instrument.startSequence(nextPlan, {
+            ended() { if (playing && session === generation) value.stop(); },
+            failed(error) {
+              if (!playing || session !== generation) return;
+              console.error('Score playback:', error);
+              value.stop();
+            },
+          });
+          positionNow = () => Math.max(nextPlan.startPosition, Math.min(nextPlan.endPosition,
+            snapshot.clock.positionAt(startSeconds + run.currentTime)));
+        } catch (error) {
+          console.error('Score playback:', error);
+          value.stop();
+          return false;
+        }
         const emitProgress = () => {
-          if (!playing || session !== generation || !plan) return;
-          const elapsed = Math.min((performance.now() - startedAt) / 1000, plan.durationSeconds);
-          onPosition?.(Math.max(plan.startPosition, Math.min(plan.endPosition,
-            snapshot.clock.positionAt(startSeconds + elapsed))));
+          if (!playing || session !== generation || !positionNow) return;
+          onPosition?.(positionNow());
         };
-        for (const event of nextPlan.pedalEvents) {
-          const timer = window.setTimeout(() => {
-            if (!playing || session !== generation) return;
-            if (event.action === 'start') instrument.setSustainPedal(true);
-            else if (event.action === 'stop') instrument.setSustainPedal(false);
-            else {
-              instrument.setSustainPedal(false);
-              instrument.setSustainPedal(true);
-            }
-          }, Math.max(0, event.atSeconds * 1000));
-          timers.push(timer);
-        }
-        for (const event of nextPlan.events) {
-          const timer = window.setTimeout(() => {
-            if (!playing || session !== generation) return;
-            if (event.pitchDurationsSeconds?.length === event.pitches.length) {
-              event.pitches.forEach((pitch, index) => instrument.play([pitch], 88,
-                Math.max(1, event.pitchDurationsSeconds![index] * 1000)));
-            } else instrument.play(event.pitches, 88, Math.max(1, event.durationSeconds * 1000));
-          }, Math.max(0, event.startSeconds * 1000));
-          timers.push(timer);
-        }
+        // Only the UI is polled. Notes, pedal and sequence completion run in audio.
         progressTimer = window.setInterval(emitProgress, 50);
-        const endTimer = window.setTimeout(() => value.stop(), nextPlan.durationSeconds * 1000);
-        timers.push(endTimer);
         emitProgress();
         return true;
       },
@@ -85,12 +72,10 @@ namespace ScorePlayback {
         if (!playing) return;
         playing = false;
         generation++;
-        for (const timer of timers) window.clearTimeout(timer);
-        timers = [];
         if (progressTimer !== undefined) window.clearInterval(progressTimer);
         progressTimer = undefined;
         instrument.stop();
-        plan = undefined;
+        positionNow = undefined;
         onPosition = undefined;
         const stopped = onStop;
         onStop = undefined;

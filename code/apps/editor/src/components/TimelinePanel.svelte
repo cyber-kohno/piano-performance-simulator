@@ -20,6 +20,7 @@
 
   import { type ScoreProject } from "../domain/score/types.ts";
   import type { OutlineCursor } from '../state/outline-cursor';
+  import { getSelectedOutlineBlocks } from '../state/outline-cursor';
   import {
     getTimelineFixedInputContext,
     getTimelineInputValue,
@@ -147,10 +148,15 @@
   const cursorWidth = $derived(getTimelineInputSixteenths(timelineCursor, outline) * pixelsPerSixteenth);
   const measureKeyCache = $derived(ScoreKey.buildMeasureCache(outline));
   const measures = $derived(outline.filter((block) => block.type === 'measure'));
-  const statusMeasure = $derived(ScoreTimeline.measureAt(outline, playbackPosition !== null
+  const selectedOutlineBlocks = $derived(mode === 'outline' ? getSelectedOutlineBlocks(outline, cursor) : []);
+  const selectedOutlineMeasureIds = $derived(new Set(selectedOutlineBlocks.length > 1
+    ? selectedOutlineBlocks.filter(block => block.type === 'measure').map(block => block.id) : []));
+  const timelineIndex = $derived(ScoreTimeline.index(outline));
+  const statusEntry = $derived(timelineIndex.measureAt(playbackPosition !== null
     ? playbackPosition : mode === 'timeline'
-      ? timelineCursor.positionSixteenths : ScoreTimeline.outlinePosition(outline, cursor.blockId))?.measure);
-  const statusMeasureNumber = $derived(statusMeasure ? measures.findIndex((measure) => measure.id === statusMeasure.id) + 1 : null);
+      ? timelineCursor.positionSixteenths : timelineIndex.blockPositions.get(cursor.blockId) ?? 0));
+  const statusMeasure = $derived(statusEntry?.measure);
+  const statusMeasureNumber = $derived(statusEntry ? statusEntry.index + 1 : null);
   const previewActiveIndex = $derived.by(() => {
     if (statusMeasureNumber !== null) return statusMeasureNumber - 1;
     if (mode !== 'outline' || !measures.length) return -1;
@@ -257,33 +263,16 @@
     const roll = pianoRollViewport;
     if (!header || !roll) return;
 
-    let totalWidth = 0;
     let focusPosition = timelineCursor.positionSixteenths * pixelsPerSixteenth + (pedalMode ? 0 : focusedGraceX);
     if (!isTimelineMode || playbackActive) {
-      focusPosition = 0;
-      for (const block of outline) {
-        if (block.id === selectedBlockId) {
-          if (block.type === 'measure') {
-            focusPosition = totalWidth +
-              (block.data.length.cnt / block.data.length.unit) * pixelsPerWhole / 2;
-          } else {
-            focusPosition = totalWidth;
-          }
-          break;
-        }
-        if (block.type === 'measure') {
-          totalWidth += (block.data.length.cnt / block.data.length.unit) * pixelsPerWhole;
-        }
-      }
+      const position = timelineIndex.blockPositions.get(selectedBlockId) ?? 0;
+      const entry = timelineIndex.measureAt(position);
+      focusPosition = position * pixelsPerSixteenth;
+      if (entry?.measure.id === selectedBlockId) focusPosition += entry.lengthSixteenths * pixelsPerSixteenth / 2;
     }
-    totalWidth = measures.reduce(
-      (width, measure) => width +
-        (measure.data.length.cnt / measure.data.length.unit) * pixelsPerWhole,
-      0,
-    );
 
     const viewportWidth = Math.min(header.clientWidth, roll.clientWidth);
-    const maxScrollLeft = Math.max(0, totalWidth + viewportWidth / 2 - viewportWidth);
+    const maxScrollLeft = Math.max(0, totalTimelineWidth + viewportWidth / 2 - viewportWidth);
     const scrollLeft = Math.max(0, Math.min(maxScrollLeft, focusPosition - viewportWidth / 2));
     animateTimelineScroll(scrollLeft);
   });
@@ -340,6 +329,7 @@
         {@const measure = item.measure}
         <div
           class="measure-header-block"
+          class:range-selected={selectedOutlineMeasureIds.has(measure.id)}
           class:first-measure={item.layout.number === 1}
           class:focused={cursor.blockId === measure.id}
           aria-current={cursor.blockId === measure.id ? 'true' : undefined}
@@ -431,6 +421,7 @@
         {@const index = item.index}
         <div
           class="measure-region"
+          class:range-selected={selectedOutlineMeasureIds.has(measure.id)}
           class:focused={mode !== 'timeline' && cursor.blockId === measure.id}
           aria-label={`Measure ${index + 1} timeline region`}
           aria-current={cursor.blockId === measure.id ? 'true' : undefined}
@@ -737,6 +728,8 @@
   .measure-header-block.focused {
     background: #f6be224f;
   }
+  .measure-header-block.range-selected { background: rgba(239, 68, 68, 0.23); }
+  .measure-header-block.range-selected.focused { background: rgba(239, 68, 68, 0.32); }
 
   .measure-start {
     position: absolute;
@@ -1207,7 +1200,8 @@
     background: rgba(48, 71, 77, 0.36);
   }
 
-  .measure-region.focused::after {
+  .measure-region.focused::after,
+  .measure-region.range-selected::after {
     position: absolute;
     z-index: 0;
     inset: 0;
@@ -1215,5 +1209,7 @@
     content: '';
     pointer-events: none;
   }
+  .measure-region.range-selected::after { background: rgba(239, 68, 68, 0.23); }
+  .measure-region.range-selected.focused::after { background: rgba(239, 68, 68, 0.32); }
 
 </style>

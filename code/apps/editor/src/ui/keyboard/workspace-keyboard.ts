@@ -6,7 +6,7 @@ import ScoreKey from '../../domain/score/score-key.ts';
 import MusicalTime from '../../domain/theory/musical-time.ts';
 import { resolveTimelineNumberInput, resolveTimelineDotInput } from '../../state/number-input.ts';
 import { TIMELINE_CURSOR_UNITS, setTimelineCursorUnit, toggleTimelineCursorDot, findTimelineNoteAtMove, moveTimelineCursorHorizontally, moveTimelineCursorPitch, selectFocusedNotePitch, focusAdjacentTimelineNote, getSelectedTimelineNotes, extendTimelineNoteSelection, collapseTimelineNoteSelection, switchTimelineStaff, cycleTimelineVoice } from '../../state/timeline-cursor.ts';
-import { moveOutlineCursor, moveOutlineSection } from '../../state/outline-cursor.ts';
+import { moveOutlineCursor, moveOutlineSection, extendOutlineSelection } from '../../state/outline-cursor.ts';
 export type WorkspaceKey = { key: string; code: string; repeat: boolean; shiftKey: boolean };
 export type WorkspaceHolds = { rangeSelection: boolean; pitchSelection: boolean; diatonicMovement: boolean; octaveMovement: boolean; keySignatureEditing: boolean; noteNavigation: boolean; noteValueEditing: boolean; tempoEditing: boolean; measureLengthEditing: boolean; notePositionEditing: boolean; meterEditing: boolean };
 namespace WorkspaceKeyboard {
@@ -42,7 +42,7 @@ namespace WorkspaceKeyboard {
       const isAddSectionKey = event.key.toLowerCase() === 's';
       const isAddKeyChangeKey = mode === 'outline' && event.key.toLowerCase() === 'x';
       const isDeleteKey = event.key === 'Delete';
-      const isEscapeKey = mode === 'timeline' && event.key === 'Escape';
+      const isEscapeKey = event.key === 'Escape';
       const isToggleAdjacentTieKey = mode === 'timeline' && (event.key === '=' || event.code === 'Equal');
       const numberInput = mode === 'timeline'
         ? resolveTimelineNumberInput(event, timelineCursor.focusedNoteId !== null, keyHold.rangeSelection)
@@ -110,6 +110,7 @@ namespace WorkspaceKeyboard {
       }
       if (isToggleModeKey && event.repeat) return;
       if (isEscapeKey) {
+        if (mode === 'outline') { outlineCursor = { blockId: outlineCursor.blockId }; return; }
         timelineCursor = {
           ...timelineCursor, selectionAnchorNoteId: null,
           focusedPitchIndex: selectedTimelineNotes.length > 1 ? 0 : timelineCursor.focusedPitchIndex,
@@ -123,7 +124,11 @@ namespace WorkspaceKeyboard {
         }
         return;
       }
-      if (selectedTimelineNotes.length > 1) {
+      if (mode === 'outline' && isMoveKey && (keyHold.rangeSelection || event.shiftKey)) {
+        outlineCursor = extendOutlineSelection(outlineCursor, project.outline, event.key === 'ArrowUp' ? -1 : 1);
+        return;
+      }
+      if (mode === 'timeline' && selectedTimelineNotes.length > 1) {
         if (isMoveKey) {
           const result = NoteEditor.transpose(project, timelineCursor, event.key === 'ArrowUp' ? 1 : -1,
             keyHold.octaveMovement && !keyHold.pitchSelection);
@@ -237,6 +242,7 @@ namespace WorkspaceKeyboard {
       }
       if (isToggleModeKey) {
         ({ project, outlineCursor, timelineCursor, mode } = EditorNavigation.toggle({ project, outlineCursor, timelineCursor, mode }));
+        outlineCursor = { blockId: outlineCursor.blockId };
         return;
       }
 

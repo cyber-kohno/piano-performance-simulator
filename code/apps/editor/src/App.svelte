@@ -3,7 +3,6 @@
   import ScoreTimeline from "./domain/score/score-timeline.ts";
   import ScoreProjectFactory from "./domain/score/score-project.ts";
   import ScoreKey from "./domain/score/score-key.ts";
-  import ScoreMeasure from './domain/score/score-measure.ts';
 
   import NoteEditor from './action/editor/note-editor';
   import OutlineEditor from './action/editor/outline-editor.ts';
@@ -106,13 +105,13 @@
     notePreview: NotePreview.Value | null;
     audioPreviewError: string | null;
   } = $props();
-  onDestroy(() => notePreview?.dispose());
   const playback = notePreview ? ScorePlayback.create(notePreview) : null;
   let playbackPosition = $state<number | null>(null);
-  onDestroy(() => playback?.dispose());
+  onDestroy(() => { playback?.dispose(); notePreview?.dispose(); });
 
   const initialProject = ScoreProjectFactory.create();
   let project = $state<ScoreProject>(initialProject);
+  const playbackTimelineIndex = $derived(ScoreTimeline.index(project.outline));
   $effect(() => {
     const revision = project;
     untrack(() => playback?.prepare(revision));
@@ -409,23 +408,6 @@
     }
     applyLoadedProject(handle, loadedProject);
   }
-  function removeFocusedOutlineElement() {
-    if (!uiEditAllowed()) return;
-    const previousProject = project;
-    const result = OutlineEditor.remove(project, outlineCursor);
-    if (result.project !== project) {
-      project = result.project;
-      outlineCursor = result.cursor;
-      timelineCursor = {
-        ...timelineCursor,
-        positionSixteenths: ScoreTimeline.outlinePosition(project.outline, outlineCursor.blockId),
-        focusedNoteId: null,
-        focusedPitchIndex: null,
-        selectionAnchorNoteId: null,
-      };
-    }
-    recordProjectChange(previousProject);
-  }
   const isEditingInitialKey = $derived(mode === 'outline' &&
     project.outline.some(block => block.id === outlineCursor.blockId && (block.type === 'init' || block.type === 'key-change')) && keyHold.keySignatureEditing);
   const isEditingInitialTempo = $derived(mode === 'outline' &&
@@ -447,9 +429,9 @@
 
   function advancePlaybackPosition(positionSixteenths: number) {
     playbackPosition = positionSixteenths;
-    const timelineEnd = ScoreTimeline.length(project.outline);
+    const timelineEnd = playbackTimelineIndex.length;
     const outlinePosition = Math.min(positionSixteenths, Math.max(0, timelineEnd - 1e-7));
-    const block = ScoreTimeline.blockAt(project.outline, outlinePosition);
+    const block = playbackTimelineIndex.blockAt(outlinePosition);
     if (block && block.id !== outlineCursor.blockId) outlineCursor = { blockId: block.id };
   }
 
@@ -586,7 +568,24 @@
     if (event.key === ' ') {
       event.preventDefault();
       if (event.repeat) return;
-      if (playback?.playing) playback.stop();
+      if (playback?.playing) {
+        if (event.shiftKey) {
+          const position = playback.position ?? playbackPosition ?? 0;
+          const entry = playbackTimelineIndex.measureAt(Math.min(position, Math.max(0, playbackTimelineIndex.length - 1e-7)));
+          if (entry) {
+            savedPlaybackFocus = null;
+            playback.stop();
+            ({ outlineCursor, timelineCursor } = EditorNavigation.sync(project.outline,
+              { blockId: entry.measure.id }, {
+                ...timelineCursor, positionSixteenths: entry.startSixteenths,
+                focusedNoteId: null, focusedGraceId: null, focusedPitchIndex: null, selectionAnchorNoteId: null,
+              }, entry.startSixteenths));
+            pedalCursor = { ...pedalCursor, position: entry.startSixteenths };
+            ottavaCursor = { ...ottavaCursor, position: entry.startSixteenths };
+            keyHold.reset();
+          } else playback.stop();
+        } else playback.stop();
+      }
       else if (playback) {
         const startPosition = mode === 'timeline' ? timelineCursor.positionSixteenths
           : ScoreTimeline.outlinePosition(project.outline, outlineCursor.blockId);
@@ -677,20 +676,6 @@
       event.defaultPrevented || event.isComposing ||
       event.altKey || event.ctrlKey || event.metaKey
     ) return;
-    if (mode === 'outline' && event.key === 'Delete' && !keyHold.pitchSelection) {
-      const block = project.outline.find(entry => entry.id === outlineCursor.blockId);
-      if (block?.type === 'measure' && ScoreMeasure.hasNotes(block.data)) {
-        event.preventDefault();
-        if (!event.repeat) EditorDialogController.confirm({
-          tone: 'danger',
-          title: 'Delete Measure',
-          messageLines: ['This measure contains notes.', 'Delete the measure and all notes in it?'],
-          confirmLabel: 'Delete',
-          onConfirm: removeFocusedOutlineElement,
-        });
-        return;
-      }
-    }
     if (mode === 'timeline' && event.key.toLowerCase() === 'w' && !event.shiftKey) {
       if (!event.repeat && openFingeringTextInput()) event.preventDefault();
       if (fingeringTextInput) return;

@@ -195,6 +195,23 @@ namespace ScoreOutline {
     };
   }
 
+  export function removeMany(outline: ScoreProject['outline'], blockIds: readonly string[], focusedId: string) {
+    const selected = new Set(blockIds);
+    selected.delete(outline[0].id);
+    let remaining = outline.filter(block => !selected.has(block.id));
+    // Keep the required leading section if the selection would expose measures or leave no section.
+    if (remaining[1]?.type !== 'section') {
+      selected.delete(outline[1].id);
+      remaining = outline.filter(block => !selected.has(block.id));
+    }
+    if (remaining.length === outline.length) return { outline, blockId: focusedId };
+    const first = outline.findIndex(block => selected.has(block.id));
+    const blockId = outline.slice(0, first).reverse().find(block => !selected.has(block.id))?.id ?? remaining[0].id;
+    const reconciled = ScoreOttava.reconcile(ScorePedal.reconcile(ScoreTies.reconcile(remaining as ScoreProject['outline'])));
+    return { outline: outline.some(block => selected.has(block.id) && block.type === 'key-change')
+      ? clearSpellingDirections(reconciled) : reconciled, blockId };
+  }
+
   export function addMeasure(
     outline: ScoreProject['outline'],
     blockId: string,

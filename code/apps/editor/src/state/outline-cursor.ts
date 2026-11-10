@@ -3,7 +3,22 @@ import type { ScoreProject, OutlineBlock } from '../domain/score/types.ts';
 /** Transient editing state, separate from the saved project data. */
 export type OutlineCursor = {
   blockId: string;
+  selectionAnchorBlockId?: string;
 };
+
+export function getSelectedOutlineBlocks(outline: readonly OutlineBlock[], cursor: OutlineCursor) {
+  const focus = outline.findIndex(block => block.id === cursor.blockId);
+  const anchor = outline.findIndex(block => block.id === cursor.selectionAnchorBlockId);
+  if (focus < 0) return [];
+  return anchor < 0 ? [outline[focus]] : outline.slice(Math.min(anchor, focus), Math.max(anchor, focus) + 1);
+}
+
+export function extendOutlineSelection(cursor: OutlineCursor, outline: readonly OutlineBlock[], direction: -1 | 1): OutlineCursor {
+  const index = outline.findIndex(block => block.id === cursor.blockId);
+  const next = outline[index + direction];
+  if (index < 0 || !next) return cursor;
+  return { blockId: next.id, selectionAnchorBlockId: cursor.selectionAnchorBlockId ?? cursor.blockId };
+}
 
 export function createOutlineCursor(outline: ScoreProject['outline']): OutlineCursor {
   // Like Scorehack, start at the first section after the initial values.
@@ -19,7 +34,7 @@ export function moveOutlineCursor(
   if (index < 0) return cursor;
 
   const next = outline[index + direction];
-  return next ? { blockId: next.id } : cursor;
+  return { blockId: next?.id ?? cursor.blockId };
 }
 
 export function moveOutlineSection(
@@ -38,7 +53,7 @@ export function moveOutlineSection(
     }
   }
 
-  return cursor;
+  return { blockId: cursor.blockId };
 }
 
 export function changeInitialKeySignature(outline: ScoreProject['outline'], cursor: OutlineCursor, direction: -1 | 1) {

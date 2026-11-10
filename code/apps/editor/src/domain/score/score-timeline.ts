@@ -15,6 +15,33 @@ export type LocatedTimelineNote = {
 };
 
 namespace ScoreTimeline {
+  // Build once per outline revision; transport updates only search this index.
+  export function index(outline: readonly OutlineBlock[]) {
+    const measures: { measure: MeasureBlock; startSixteenths: number; lengthSixteenths: number; index: number }[] = [];
+    const blockPositions = new Map<string, number>();
+    let length = 0;
+    let lastSection: OutlineBlock | undefined;
+    for (const block of outline) {
+      blockPositions.set(block.id, length);
+      if (block.type === 'section') lastSection = block;
+      if (block.type !== 'measure') continue;
+      const lengthSixteenths = block.data.length.cnt / block.data.length.unit * 16;
+      measures.push({ measure: block, startSixteenths: length, lengthSixteenths, index: measures.length });
+      length += lengthSixteenths;
+    }
+    const measureAt = (position: number) => {
+      let low = 0, high = measures.length;
+      while (low < high) {
+        const middle = (low + high) >>> 1;
+        if (measures[middle].startSixteenths + measures[middle].lengthSixteenths <= position) low = middle + 1;
+        else high = middle;
+      }
+      const entry = measures[low];
+      return entry && position >= entry.startSixteenths && position < entry.startSixteenths + entry.lengthSixteenths ? entry : undefined;
+    };
+    return { length, blockPositions, measureAt, blockAt: (position: number) => measureAt(position)?.measure ?? lastSection };
+  }
+
   export function length(outline: readonly OutlineBlock[]): number {
     return outline.reduce((sum, block) => sum + (block.type === 'measure' ? block.data.length.cnt / block.data.length.unit * 16 : 0), 0);
   }

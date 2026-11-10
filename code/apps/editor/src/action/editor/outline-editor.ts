@@ -1,5 +1,6 @@
 import type { ScoreProject } from "../../domain/score/types.ts";
 import type { OutlineCursor } from '../../state/outline-cursor.ts';
+import { getSelectedOutlineBlocks } from '../../state/outline-cursor.ts';
 import ScoreOutline from '../../domain/score/score-outline.ts';
 import EditTransaction from './edit-transaction.ts';
 
@@ -23,7 +24,10 @@ namespace OutlineEditor {
     return finish(project, ScoreOutline.addKeyChange(project.outline, cursor.blockId));
   }
   export function remove(project: ScoreProject, cursor: OutlineCursor) {
-    return finish(project, ScoreOutline.remove(project.outline, cursor.blockId));
+    const blocks = getSelectedOutlineBlocks(project.outline, cursor);
+    return finish(project, blocks.length > 1
+      ? ScoreOutline.removeMany(project.outline, blocks.map(block => block.id), cursor.blockId)
+      : ScoreOutline.remove(project.outline, cursor.blockId));
   }
   export function changeKey(project: ScoreProject, cursor: OutlineCursor, direction: -1 | 1) {
     return commit(project, ScoreOutline.changeKey(project.outline, cursor.blockId, direction));
