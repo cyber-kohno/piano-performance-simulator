@@ -25,7 +25,7 @@ namespace ScoreEditImpact {
 
   export function compare(before: ScoreProject, after: ScoreProject) {
     const previous = inspect(before), next = inspect(after);
-    const fields = ['beforeGraceNotes', 'gracePerformance', 'staccato', 'arpeggio'] as const;
+    const fields = ['beforeGraceNotes', 'gracePerformance', 'staccato', 'accent', 'fermata', 'arpeggio'] as const;
     const removedNoteAttachments = [...previous.notes].flatMap(([noteId, note]) => {
       const target = next.notes.get(noteId);
       const removed = fields.filter(field => note[field] !== undefined && target?.[field] === undefined);
@@ -33,7 +33,7 @@ namespace ScoreEditImpact {
         return [{ noteId, fields: [...removed, 'fingering'] }];
       return removed.length ? [{ noteId, fields: [...removed] }] : [];
     });
-    const removedAnchors = (['tempoChanges', 'clefChanges'] as const).flatMap(kind => (before[kind] ?? [])
+    const removedAnchors = (['tempoChanges', 'clefChanges', 'dynamicChanges'] as const).flatMap(kind => (before[kind] ?? [])
       .filter(change => !(after[kind] ?? []).some(next => next.noteId === change.noteId)).map(change => ({ kind, noteId: change.noteId })));
     return { removedIds: [...previous.ids].filter(id => !next.ids.has(id)), removedNoteAttachments, removedAnchors };
   }

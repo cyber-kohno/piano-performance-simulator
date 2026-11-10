@@ -1,11 +1,11 @@
 import type { PlaybackInstrumentPort } from './playback-instrument.ts';
 import ScorePlaybackPlan from '../../domain/performance/score-playback-plan.ts';
-import ScoreClock from '../../domain/performance/score-clock.ts';
 import type { ScoreProject } from '../../domain/score/types.ts';
 
 namespace ScorePlayback {
   export type Value = {
     readonly playing: boolean;
+    prepare(project: ScoreProject): void;
     start(project: ScoreProject, startPosition: number, onPosition: (position: number) => void, onStop: () => void): boolean;
     stop(): void;
     dispose(): void;
@@ -20,11 +20,23 @@ namespace ScorePlayback {
     let onStop: (() => void) | undefined;
     let plan: ReturnType<typeof ScorePlaybackPlan.create> | undefined;
     let startedAt = 0;
+    let preparedProject: ScoreProject | undefined;
+    let prepared: ReturnType<typeof ScorePlaybackPlan.prepare> | undefined;
+    let cachedPlan: ReturnType<typeof ScorePlaybackPlan.create> | undefined;
     const value: Value = {
       get playing() { return playing; },
+      prepare(project) {
+        if (preparedProject === project) return;
+        prepared = ScorePlaybackPlan.prepare(project);
+        preparedProject = project;
+        cachedPlan = undefined;
+      },
       start(project, startPosition, updatePosition, stopped) {
         if (playing) return false;
-        const nextPlan = ScorePlaybackPlan.create(project, startPosition);
+        value.prepare(project);
+        const snapshot = prepared!;
+        const nextPlan = cachedPlan?.startPosition === startPosition ? cachedPlan : snapshot.create(startPosition);
+        cachedPlan = nextPlan;
         if (nextPlan.durationSeconds <= 0 || nextPlan.events.length === 0) return false;
         instrument.stop();
         plan = nextPlan;
@@ -33,18 +45,13 @@ namespace ScorePlayback {
         playing = true;
         const session = ++generation;
         startedAt = performance.now();
+        const startSeconds = snapshot.clock.secondsAt(nextPlan.startPosition);
         instrument.setSustainPedal(nextPlan.pedalInitiallyDown);
         const emitProgress = () => {
           if (!playing || session !== generation || !plan) return;
           const elapsed = Math.min((performance.now() - startedAt) / 1000, plan.durationSeconds);
-          const targetSeconds = ScoreClock.secondsAt(project, plan.startPosition) + elapsed;
-          let low = plan.startPosition, high = plan.endPosition;
-          for (let i = 0; i < 24; i++) {
-            const middle = (low + high) / 2;
-            if (ScoreClock.secondsAt(project, middle) < targetSeconds) low = middle;
-            else high = middle;
-          }
-          onPosition?.(Math.min(plan.endPosition, (low + high) / 2));
+          onPosition?.(Math.max(plan.startPosition, Math.min(plan.endPosition,
+            snapshot.clock.positionAt(startSeconds + elapsed))));
         };
         for (const event of nextPlan.pedalEvents) {
           const timer = window.setTimeout(() => {
@@ -89,7 +96,12 @@ namespace ScorePlayback {
         onStop = undefined;
         stopped?.();
       },
-      dispose() { value.stop(); },
+      dispose() {
+        value.stop();
+        preparedProject = undefined;
+        prepared = undefined;
+        cachedPlan = undefined;
+      },
     };
     return value;
   }

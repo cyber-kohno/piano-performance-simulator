@@ -117,6 +117,47 @@ test('grace notes, trills, staccato, arpeggio and fingering survive rendering an
   assert.equal(ns(project)[0].beforeGraceNotes, undefined); assert.equal(project.trills, undefined);
 });
 
+test('MCP accent settings round-trip, coexist with staccato and export once per chord', () => {
+  let project = score(1);
+  const chordId = ns(project)[2].id;
+  project = edit(project, [{ type: 'set_note_expression', noteId: chordId,
+    accent: { velocityRate: 1.5 }, staccato: { type: 'normal', lengthRatio: 0.5 } }]);
+  project = edit(project, [{ type: 'set_note_expression', noteId: chordId, accent: { velocityRate: 2 } }]);
+  const chord = ns(project).find(note => note.id === chordId);
+  assert.equal(chord.accent.velocityRate, 2);
+  assert.equal(chord.staccato.lengthRatio, 0.5);
+  const read = Reader.range(project, { firstMeasure: 1, measureCount: 1 });
+  assert.equal(read.measures[0].staves[0].voices[0].elements.find(note => note.id === chordId).accent.velocityRate, 2);
+  const xml = JSON.stringify(Preview.create(project.outline, 0));
+  assert.equal((xml.match(/<accent\/>/g) ?? []).length, 1);
+  assert.ok(xml.includes('<staccato/>'));
+  project = edit(project, [{ type: 'set_note_expression', noteId: chordId, accent: null }]);
+  assert.equal(ns(project)[2].accent, undefined);
+  assert.equal(ns(project)[2].staccato.lengthRatio, 0.5);
+});
+
+test('MCP rejects accent on incoming ties and invalid rates atomically, but allows removal', () => {
+  let project = score(1);
+  const [a, b] = ns(project);
+  project = edit(project, [
+    { type: 'set_pitches', noteId: b.id, pitches: ['C4'] },
+    { type: 'set_note_expression', noteId: b.id, accent: { velocityRate: 1.5 } },
+    { type: 'set_tie', fromNoteId: a.id, toNoteId: b.id },
+  ]);
+  // Adding a tie to an existing accent does not remove it in this iteration.
+  assert.equal(ns(project)[1].accent.velocityRate, 1.5);
+  const baseline = structuredClone(project);
+  assert.throws(() => edit(project, [{ type: 'set_note_expression', noteId: b.id, accent: { velocityRate: 2 } }]), /tied from/);
+  for (const velocityRate of [0.9, 2.1, 1.55]) {
+    assert.throws(() => edit(project, [{ type: 'set_note_expression', noteId: a.id, accent: { velocityRate } }]));
+  }
+  assert.deepEqual(project, baseline);
+  project = edit(project, [{ type: 'set_note_expression', noteId: b.id, accent: null }]);
+  project = edit(project, [{ type: 'set_note_expression', noteId: a.id, accent: { velocityRate: 1 } }]);
+  assert.equal(ns(project)[1].accent, undefined);
+  assert.equal(ns(project)[0].accent.velocityRate, 1);
+});
+
 test('invalid ornament targets and relationships reject the entire candidate', () => {
   const project = score(1), notes = ns(project), baseline = structuredClone(project);
   for (const operations of [

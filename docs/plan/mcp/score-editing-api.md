@@ -45,7 +45,7 @@ finish_checkoutは公開時点の実プロジェクトとの競合を検査す�
 | set_value | 音符・休符のelementIdと音価。開始位置は声部内の順序から再計算。休符を自動補完しない |
 | set_rest | 指定音符を同じ音価・IDの休符へ変更 |
 | set_grace_notes | 親noteIdに前置装飾音符列を設定。空配列で解除。各音はpitch・value・slashと任意の運指。既存の子idを指定して保持可能 |
-| set_note_expression | noteIdにstaccato／arpeggioを設定。指定したフィールドだけ変更、nullで解除 |
+| set_note_expression | noteIdにstaccato／accent／fermata／arpeggioを設定。指定したフィールドだけ変更、nullで解除。accentは`{ velocityRate: 1.5 }`形式で、1.0〜2.0の0.1刻み。前からタイで連結された音符へのaccentの設定・変更は拒否（解除は可能）。fermataは下記参照。フェルマータは楽譜表示・プレビュー再生に反映。アクセントは楽譜表示のみで、演奏ベロシティへの反映は未対応 |
 | set_fingering | noteId・pitchIndexに運指／替え指を設定。graceNoteIdを追加すれば装飾音符も対象。fingering=nullで両方解除 |
 | set_tie | fromNoteIdからtoNoteIdへの接続。toNoteId=nullで出方向の接続／構築中の接続予定を解除 |
 | set_slur | 始点・終点のnoteIdで作成。slurIdを渡すと既存スラーの端点変更 |
@@ -55,6 +55,7 @@ finish_checkoutは公開時点の実プロジェクトとの競合を検査す�
 | set_ottava_event／remove_ottava_event | 独立したposition・staffにstart/stopを設定・解除 |
 | set_tempo_change | 上段・声部1のnoteIdにbpmを設定、nullで解除。現モデルのアンカー制限に従う |
 | set_clef_change | 対象段・声部1のnoteIdにtreble/bassを設定、nullで解除 |
+| set_dynamic_change | 上段・声部1のnoteIdにlevel（ppp／pp／p／mp／mf／f／ff／fff）を設定、nullで解除。変更位置から次の記号まで全声部・両段に共通適用する状態を保存。楽譜表示のみ、演奏ベロシティは未対応 |
 | set_initial_values | 初期meter・keyFifths・tempoを設定。既存小節の実長・音符は自動変更しない |
 | set_measure_length | measureIdの実長をlength=[分子,分母]へ変更。弱起等に使用 |
 | set_key_change | beforeMeasureIdの直前、afterBlockIdの直後、または既存keyChangeIdを指定して設定・更新。3つの指定は排他。keyFifths=nullで対象ブロックを解除 |
@@ -62,6 +63,15 @@ finish_checkoutは公開時点の実プロジェクトとの競合を検査す�
 | rename_section／remove_section | sectionIdを指定。必須の先頭セクションは削除不可 |
 
 ## 対象・時間・参照の規則
+
+- 強弱は`{ type: "set_dynamic_change", noteId: "取得した音符ID", level: "p" }`で設定する。タイの先頭・途中・終端、和音、短い音符、付点、連符に設定可能。他の表現との排他制限はない。休符・装飾音符・下段・声部2以降への設定は拒否する。同時刻に発音する他声部の音も、将来の再生対応時には同じ状態を使う。記号以前の既定状態はmf。現在は再生データ・ベロシティを変更しない。
+- 強弱の変更位置は音符IDに追従し、音価・ピッチ変更でも保持する。タイ正規化では変更位置を境界として保存する。音符削除・休符化・声部置換でアンカーがなくなった場合はGUI・MCPとも自動解除し、直前の強弱が有効になる。通常の音符複製・範囲コピーでは変更設定を複製しない。
+- 保存形式は`dynamicChanges: [{ noteId, level }]`。`get_score_range`は範囲内の`dynamicChanges`と各小節先頭の`dynamicAtStart`を返し、範囲外の変更から引き継いだ状態も確認できる。MusicXMLには実際の変更位置だけ`direction/dynamics`を出力し、音符・音部記号を書き換えず、`sound dynamics`は出力しない。
+
+- フェルマータは`{ type: "set_note_expression", noteId: "取得した音符ID", fermata: { lengthRatio: 2.0 } }`で設定・変更、`fermata: null`で解除する。倍率は1.0〜4.0の0.1刻み、UI初期値は2.0。プレビュー再生では共通範囲の経過時間を倍率分引き延ばし、全声部・両段の音符・休符・ペダルおよび再生線に共通適用する。範囲外は元の速度で進む。
+- 全声部・両段のフェルマータ付き音符区間を比較し、重なるものは絶対的な終了位置が一致する場合だけ許可する。隣接するだけの範囲は重複としない。グループの範囲は最も早い開始から共通終端までとし、倍率は声部番号の小さい順、同じなら上段を優先する。例えば下段の全音符と上段の最後の4分音符なら、全音符の範囲に上段の倍率を採用する。`get_score_range`の`fermataGroups`で有効倍率・優先元・絶対範囲（四分音符単位の分数）を取得できる。
+- 音価・付点・絶対的な開始／終了位置が変わった音符のフェルマータは削除する。他ノート・小節の編集で移動した音符も対象。ピッチ変更・和音追加では保持する。MCPで時間編集後に明示的な再設定を同じバッチに置くことは可能だが、確定時にも重複制限を検証する。
+- 単音・和音の全音価、付点、連符内の音符に設定可能。休符・装飾音符は対象外。タイ列は終端だけに設定できる。フェルマータ付き音符から後続へタイを追加する場合は、同じバッチでフェルマータを解除するか終端へ移す。
 
 - 小節番号は検索用の1始まり、voiceIndexとpitchIndexは0始まり。編集は取得したIDで行う。
 - 普通の音高変更等では音符IDを維持する。声部の全置換では要素IDを再生成し、旧音符の付随表現も置き換わる。音符IDと表現を保持する修正はset_pitches／set_value等を使用する。

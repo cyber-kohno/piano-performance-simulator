@@ -9,11 +9,12 @@ namespace StaccatoPerformance {
     articulatedSegmentStart: number,
     articulatedSegmentLength: number,
     settings?: StaccatoSettings,
+    secondsAt = (position: number) => ScoreClock.secondsAt(project, position),
   ): number {
-    const writtenEndSeconds = ScoreClock.secondsAt(project, writtenEndPosition);
+    const writtenEndSeconds = secondsAt(writtenEndPosition);
     if (!settings) return writtenEndSeconds;
     const segmentEnd = articulatedSegmentStart + articulatedSegmentLength;
-    const segmentSeconds = ScoreClock.secondsAt(project, segmentEnd) - ScoreClock.secondsAt(project, articulatedSegmentStart);
+    const segmentSeconds = secondsAt(segmentEnd) - secondsAt(articulatedSegmentStart);
     return writtenEndSeconds - segmentSeconds * (1 - settings.lengthRatio);
   }
 }

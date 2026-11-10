@@ -9,12 +9,16 @@ import ScoreSlur from '../../domain/score/score-slur.ts';
 import ScoreTrill from '../../domain/score/score-trill.ts';
 import Integrity from '../../domain/score/score-integrity.ts';
 import Impact from '../../domain/score/score-edit-impact.ts';
+import ScoreFermata from '../../domain/score/score-fermata.ts';
+import ScoreDynamics from '../../domain/score/score-dynamics.ts';
 import MusicalTime from '../../domain/theory/musical-time.ts';
-import type { KeySignature, PianoNote, PianoStaffName, ScoreProject, TrillSettings, StaccatoSettings, ArpeggioSettings, GracePerformanceSettings, PianoFingering } from '../../domain/score/types.ts';
+import type { DynamicLevel, KeySignature, PianoNote, PianoStaffName, ScoreProject, TrillSettings, StaccatoSettings, ArpeggioSettings, GracePerformanceSettings, PianoFingering } from '../../domain/score/types.ts';
 
 namespace ScoreEditing {
   export function apply(project: ScoreProject, state: AuthoringState, operations: unknown) {
     Contract.validate(operations);
+    const fermataTiming = ScoreFermata.capture(project);
+    const reappliedFermatas = new Set<string>();
     let candidate = JSON.parse(JSON.stringify(project)) as ScoreProject;
     let nextState = structuredClone(state);
     const changedIds = new Set<string>();
@@ -25,6 +29,8 @@ namespace ScoreEditing {
       const path = `operations[${operationIndex}]`;
       try {
         const type = op.type as string;
+        if (['create_score', 'replace_voice', 'set_value', 'set_rest', 'set_measure_length',
+          'remove_measures', 'insert_measures', 'append_measures', 'remove_voice'].includes(type)) reappliedFermatas.clear();
         const ids: string[] = [];
         const fail = (message: string, code = 'INVALID_EDIT'): never => Input.fail(path, message, code);
         const measure = (id: unknown) => {
@@ -141,9 +147,24 @@ namespace ScoreEditing {
           ids.push(target.item.id);
         } else if (type === 'set_note_expression') {
           const target = note(op.noteId);
-          if (!('staccato' in op) && !('arpeggio' in op)) fail('Provide at least one expression field.');
+          if (!('staccato' in op) && !('accent' in op) && !('fermata' in op) && !('arpeggio' in op)) fail('Provide at least one expression field.');
           if ('staccato' in op) { if (op.staccato === null) delete target.item.staccato; else target.item.staccato = op.staccato as StaccatoSettings; }
+          if ('accent' in op) {
+            if (op.accent === null) delete target.item.accent;
+            else {
+              if (target.item.tieFrom) fail('Accent is unavailable on a note tied from a preceding note.');
+              target.item.accent = op.accent as NonNullable<typeof target.item.accent>;
+            }
+          }
           if ('arpeggio' in op) { if (op.arpeggio === null) delete target.item.arpeggio; else target.item.arpeggio = op.arpeggio as ArpeggioSettings; }
+          if ('fermata' in op) {
+            if (op.fermata === null) delete target.item.fermata;
+            else {
+              if (target.item.tieTo) fail('Fermata is available only on the last note of the tie chain.');
+              target.item.fermata = op.fermata as NonNullable<typeof target.item.fermata>;
+              reappliedFermatas.add(target.item.id);
+            }
+          }
           ids.push(target.item.id);
         } else if (type === 'set_fingering') {
           const target = note(op.noteId);
@@ -204,6 +225,12 @@ namespace ScoreEditing {
             block.data[key]!.sort((a, b) => MusicalTime.compare(a.offset, b.offset));
             ids.push(id);
           }
+        } else if (type === 'set_dynamic_change') {
+          const target = note(op.noteId);
+          if (!ScoreDynamics.anchors(candidate).some(anchor => anchor.noteId === target.item.id)) fail('Dynamics require an upper-staff voice-1 written note.');
+          if (op.level !== null && !ScoreDynamics.isLevel(op.level)) fail('Invalid dynamic level.');
+          candidate = ScoreDynamics.set(candidate, target.item.id, op.level as DynamicLevel | null);
+          ids.push(target.item.id);
         } else if (type === 'set_tempo_change' || type === 'set_clef_change') {
           note(op.noteId);
           if (type === 'set_tempo_change') {
@@ -253,8 +280,10 @@ namespace ScoreEditing {
         throw error;
       }
     });
-    // No reconcile here: explicitly detached references are allowed, orphaned ones are rejected.
+    // Validate metrical structure before deriving timing from a possibly multi-operation edit.
     Authoring.validate(candidate, nextState, false);
+    candidate = ScoreFermata.reconcileCaptured(fermataTiming, candidate, reappliedFermatas);
+    candidate = ScoreDynamics.reconcile(candidate);
     Integrity.validate(candidate);
     return { project: candidate, state: nextState, summary: { addedMeasures, addedNotes, measureCount: candidate.outline.filter(b => b.type === 'measure').length,
       unresolvedTies: Object.keys(nextState.pending).length, changedIds: [...changedIds], ...Impact.compare(project, candidate), operations: results } };

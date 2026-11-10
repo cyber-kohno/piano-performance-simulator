@@ -361,14 +361,14 @@ export function moveFocusedTimelineNote(project: ScoreProject,cursor: TimelineCu
 
 export function setFocusedNoteStaccato(project: ScoreProject,cursor: TimelineCursor,staccato: StaccatoSettings|undefined): ScoreProject {
   const selected=cursor.focusedNoteId? ScoreTimeline.note(project.outline,cursor.focusedNoteId,cursor.staff):undefined;
-  return setFocusedNoteExpressions(project,cursor,{ staccato,arpeggio: selected?.note.arpeggio });
+  return setFocusedNoteExpressions(project,cursor,{ staccato,accent: selected?.note.accent,fermata: selected?.note.fermata,arpeggio: selected?.note.arpeggio });
 }
 export function setFocusedNoteArpeggio(project: ScoreProject,cursor: TimelineCursor,arpeggio: ArpeggioSettings|undefined): ScoreProject {
   const selected=cursor.focusedNoteId? ScoreTimeline.note(project.outline,cursor.focusedNoteId,cursor.staff):undefined;
-  return setFocusedNoteExpressions(project,cursor,{ arpeggio,staccato: selected?.note.staccato });
+  return setFocusedNoteExpressions(project,cursor,{ arpeggio,accent: selected?.note.accent,fermata: selected?.note.fermata,staccato: selected?.note.staccato });
 }
 /** Commit optional expressions together so replacing an exclusive effect is atomic. */
-export function setFocusedNoteExpressions(project: ScoreProject,cursor: TimelineCursor,settings: Pick<PianoNote,'staccato'|'arpeggio'>): ScoreProject {
+export function setFocusedNoteExpressions(project: ScoreProject,cursor: TimelineCursor,settings: Pick<PianoNote,'staccato'|'accent'|'fermata'|'arpeggio'>): ScoreProject {
   if(getSelectedTimelineNotes(project.outline,cursor).length!==1||!cursor.focusedNoteId||cursor.focusedGraceId) return project;
   return NoteExpressions.set(project,{ noteId: cursor.focusedNoteId,staff: cursor.staff },settings);
 }

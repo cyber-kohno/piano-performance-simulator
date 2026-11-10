@@ -126,7 +126,7 @@ namespace NoteDuration {
     for(const entry of chain) {
       const previousId=chain[chain.indexOf(entry)-1]?.note.id;
       const slurBoundary=project.slurs?.some(slur => slur.startNoteId===entry.note.id||slur.endNoteId===entry.note.id||slur.endNoteId===previousId);
-      if(!groups.length||slurBoundary||project.tempoChanges?.some(change => change.noteId===entry.note.id)||project.clefChanges?.some(change => change.noteId===entry.note.id)||entry.note.staccato||entry.note.arpeggio||entry.note.beforeGraceNotes?.length||!samePitches(groups[groups.length-1].pitches,entry.note.pitches)) {
+      if(!groups.length||slurBoundary||project.tempoChanges?.some(change => change.noteId===entry.note.id)||project.clefChanges?.some(change => change.noteId===entry.note.id)||project.dynamicChanges?.some(change => change.noteId===entry.note.id)||entry.note.staccato||entry.note.accent||entry.note.fermata||entry.note.arpeggio||entry.note.beforeGraceNotes?.length||!samePitches(groups[groups.length-1].pitches,entry.note.pitches)) {
         groups.push({ start: entry.measureStartSixteenths+entry.positionSixteenths,pitches: entry.note.pitches });
       }
     }
@@ -169,6 +169,13 @@ namespace NoteDuration {
       if(index>0) plan.note.tieFrom=plans[index-1].note.id;
       if(index+1<plans.length) plan.note.tieTo=plans[index+1].note.id;
     });
+    // Only unchanged written segments retain a fermata after normalization.
+    const finalPlan = plans[plans.length - 1];
+    if (last.note.fermata && finalPlan.note.id === last.note.id &&
+      finalPlan.onset === last.measureStartSixteenths + last.positionSixteenths &&
+      finalPlan.note.value.type === last.note.value.type && finalPlan.note.value.dots === last.note.value.dots) {
+      finalPlan.note.fermata = { ...last.note.fermata };
+    }
     const selected=chain.find(({ note }) => note.id===target.noteId)!;
     const selectedOnset=selected.measureStartSixteenths+selected.positionSixteenths;
     const tail=direction===0

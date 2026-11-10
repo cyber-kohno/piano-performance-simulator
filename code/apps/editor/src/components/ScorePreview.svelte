@@ -3,12 +3,12 @@
   import ScorePreviewRenderer from '../infra/notation/score-preview-renderer.ts';
   import type { ScoreProject } from '../domain/score/types.ts';
 
-  let { outline, activeIndex, trills, tempoChanges, clefChanges, slurs, selectedNoteIds = [] }: { outline: ScoreProject['outline']; activeIndex: number; trills?: ScoreProject['trills']; tempoChanges?: ScoreProject['tempoChanges']; clefChanges?: ScoreProject['clefChanges']; slurs?: ScoreProject['slurs']; selectedNoteIds?: string[] } = $props();
+  let { outline, activeIndex, trills, tempoChanges, clefChanges, slurs, dynamicChanges, selectedNoteIds = [] }: { outline: ScoreProject['outline']; activeIndex: number; trills?: ScoreProject['trills']; tempoChanges?: ScoreProject['tempoChanges']; clefChanges?: ScoreProject['clefChanges']; dynamicChanges?: ScoreProject['dynamicChanges']; slurs?: ScoreProject['slurs']; selectedNoteIds?: string[] } = $props();
   let host = $state<HTMLDivElement>();
   let message = $state<string | null>(null);
   let paintSelection = $state<((ids: readonly string[]) => void) | null>(null);
   $effect(() => { paintSelection?.(selectedNoteIds); });
-  const preview = $derived(PreviewMusicXml.create(outline, activeIndex, trills, tempoChanges, clefChanges, slurs));
+  const preview = $derived(PreviewMusicXml.create(outline, activeIndex, trills, tempoChanges, clefChanges, slurs, dynamicChanges));
   $effect(() => {
     const target=host, document=preview;
     paintSelection=null;

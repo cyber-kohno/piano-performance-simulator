@@ -6,6 +6,7 @@ import ScoreTrill from "../../domain/score/score-trill.ts";
 import ScoreClef from "../../domain/score/score-clef.ts";
 
 import ScoreTempo from "../../domain/score/score-tempo.ts";
+import ScoreDynamics from "../../domain/score/score-dynamics.ts";
 
 import ScoreSlur from "../../domain/score/score-slur.ts";
 
@@ -57,7 +58,7 @@ namespace PreviewMusicXml {
     return initial || substitution ? `<technical>${initial}${substitution}</technical>` : '';
   }
 
-  export function create(outline: ScoreProject['outline'], activeIndex: number, trills: ScoreProject['trills'] = [], tempoChanges: ScoreProject['tempoChanges'] = [], clefChanges: ScoreProject['clefChanges'] = [], slurs: ScoreProject['slurs'] = []) {
+  export function create(outline: ScoreProject['outline'], activeIndex: number, trills: ScoreProject['trills'] = [], tempoChanges: ScoreProject['tempoChanges'] = [], clefChanges: ScoreProject['clefChanges'] = [], slurs: ScoreProject['slurs'] = [], dynamicChanges: ScoreProject['dynamicChanges'] = []) {
     const measures = outline.filter((block) => block.type === 'measure');
     if (activeIndex < 0 || activeIndex >= measures.length) return null;
     const sectionNameByMeasure = sectionMarkers(outline);
@@ -84,6 +85,7 @@ namespace PreviewMusicXml {
     const clefs = ScoreClef.changes(clefProject);
     const clefXml = (clef: Clef, number: number) => `<clef number="${number}"><sign>${clef === 'treble' ? 'G' : 'F'}</sign><line>${clef === 'treble' ? 2 : 4}</line></clef>`;
     const tempos = ScoreTempo.changes(tempoProject);
+    const dynamics = ScoreDynamics.changes({ outline, dynamicChanges });
     const ottavaEvents = ScoreOttava.events({ outline });
     const beat = Meter.beatLength(initial.timeSignature);
     const beatLength = beat.cnt / beat.unit * 16;
@@ -198,6 +200,9 @@ namespace PreviewMusicXml {
         body += tempoDirection(ScoreTempo.at(tempoProject, firstStart), 0);
       }
       for (const change of localTempos) body += tempoDirection(change.bpm, change.localPosition);
+      for (const change of dynamics.filter(change => change.measureId === measure.id)) {
+        body += `<direction placement="below"><direction-type><dynamics><${change.level}/></dynamics></direction-type><offset>${Math.round(change.localPosition * ticksPerSixteenth)}</offset><staff>1</staff></direction>`;
+      }
       // Attributes have no offset. Place staff-wide changes in score time, then
       // rewind to the measure head before writing each voice's unchanged notes.
       let clefPosition = 0;
@@ -249,7 +254,8 @@ namespace PreviewMusicXml {
             const ties = `${from ? '<tie type="stop"/>' : ''}${to ? '<tie type="start"/>' : ''}`;
             const notations = (pitchIndex === 0 ? bracket + (slurMarks.get(element.id) ?? '') : '') +
               (pitchIndex === 0 && trillByNote.has(element.id) ? '<ornaments>' + trillByNote.get(element.id)!.replaceAll('number="1"', 'number="' + voiceNumber + '"') + '</ornaments>' : '') + `${from ? '<tied type="stop"/>' : ''}${to ? '<tied type="start"/>' : ''}` +
-              (pitchIndex === 0 && element.staccato ? `<articulations><${element.staccato.type === 'normal' ? 'staccato' : 'staccatissimo'}/></articulations>` : '') +
+              (pitchIndex === 0 && element.fermata ? '<fermata type="upright"/>' : '') +
+              (pitchIndex === 0 && (element.staccato || element.accent) ? `<articulations>${element.accent ? '<accent/>' : ''}${element.staccato ? `<${element.staccato.type === 'normal' ? 'staccato' : 'staccatissimo'}/>` : ''}</articulations>` : '') +
               (element.arpeggio ? `<arpeggiate number="${voiceNumber}"${element.arpeggio.type === 'down' ? ' direction="down"' : ''}/>` : '') +
               fingeringXml(pitch);
             body += `<note>${pitchIndex ? '<chord/>' : ''}${pitchXml(pitch, measureKey)}<duration>${duration}</duration>${ties}<voice>${voiceNumber}</voice>${written}${modification}` +

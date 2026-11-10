@@ -5,6 +5,7 @@
   import ScoreTrill from "../domain/score/score-trill.ts";
 
   import ScoreTimeline from "../domain/score/score-timeline.ts";
+  import ScoreVoice from '../domain/score/score-voice.ts';
   import WrittenValue from "../domain/theory/written-value.ts";
   import TimelineView from '../state/timeline-view.ts';
   import ScoreKey from "../domain/score/score-key.ts";
@@ -28,8 +29,9 @@
     type TimelineCursor,
   } from "../state/timeline-cursor";
 
-  let { outline, cursor, timelineCursor, mode, pedalMode = false, pedalCursor, ottavaMode = false, ottavaCursor, playbackPosition = null, playbackActive = false, expressionModalOpen = false, trills = [], tempoChanges = [], clefChanges = [], slurs = [] }: {
+  let { outline, cursor, timelineCursor, mode, pedalMode = false, pedalCursor, ottavaMode = false, ottavaCursor, playbackPosition = null, playbackActive = false, expressionModalOpen = false, trills = [], tempoChanges = [], clefChanges = [], dynamicChanges = [], slurs = [] }: {
     slurs?: ScoreProject['slurs'];
+    dynamicChanges?: ScoreProject['dynamicChanges'];
     tempoChanges?: ScoreProject['tempoChanges'];
     clefChanges?: ScoreProject['clefChanges'];
     outline: ScoreProject['outline'];
@@ -226,7 +228,11 @@
     const notes = TimelineView.notesForMeasure(measure, notesWithVisualGap, independentNoteGapPixels, pixelsPerSixteenth)
       .filter(entry => entry.note.pitches.some(pitch => pitch.midi >= visiblePitchBounds.min && pitch.midi <= visiblePitchBounds.max) ||
         (entry.note.beforeGraceNotes ?? []).some(grace => grace.pitches.some(pitch => pitch.midi >= visiblePitchBounds.min && pitch.midi <= visiblePitchBounds.max)));
-    return { index, measure, layout, notes, ticks: TimelineView.ticks(layout, outline[0].data.timeSignature, pixelsPerWhole) };
+    const voice = measure.data[timelineCursor.staff].voices[timelineCursor.voiceIndex];
+    const tuplets = voice ? ScoreVoice.locate(voice, measure.data.length)
+      .filter(entry => entry.element.kind === 'tuplet')
+      .map(entry => ({ start: entry.positionSixteenths, length: entry.lengthSixteenths, id: entry.element.id })) : [];
+    return { index, measure, layout, notes, tuplets, ticks: TimelineView.ticks(layout, outline[0].data.timeSignature, pixelsPerWhole) };
   }));
   const visibleTimelineStart = $derived(Math.max(0, timelineScrollLeft - Math.max(480, timelineViewportWidth)));
   const visibleTimelineEnd = $derived(timelineScrollLeft + Math.max(1, timelineViewportWidth || 960) + Math.max(480, timelineViewportWidth));
@@ -433,6 +439,9 @@
           <div class="pitch-margin top" aria-hidden="true"></div>
           <div class="pitch-lanes" style={`background-image: ${pitchLaneBackground(measure.id)}`} aria-hidden="true"></div>
           <div class="pitch-margin bottom" aria-hidden="true"></div>
+          {#each item.tuplets as tuplet (tuplet.id)}
+            <div class="tuplet-column" style={`left: ${tuplet.start * pixelsPerSixteenth}px; width: ${tuplet.length * pixelsPerSixteenth}px`} aria-hidden="true"></div>
+          {/each}
           {#each item.ticks as tick (tick.position)}
             <div
               class="roll-gridline"
@@ -455,6 +464,10 @@
             {/if}
             {@const activeNoteHeight = entry.length % 4 === 0 ? 24 : entry.length % 2 === 0 ? 18 : 14}
             {@const noteTempo = entry.staff === 'upperStaff' && entry.voiceIndex === 0 ? tempoChanges?.find(change => change.noteId === note.id) : undefined}
+            {@const noteDynamic = entry.staff === 'upperStaff' && entry.voiceIndex === 0 ? dynamicChanges.find(change => change.noteId === note.id) : undefined}
+            {#if noteDynamic}
+              <span class="dynamic-mark" aria-label={`Dynamics ${noteDynamic.level}`} style={`left: ${entry.position * pixelsPerSixteenth + 4}px; top: ${pitchTopMargin + (108 - note.pitches[note.pitches.length - 1].midi) * pitchRowHeight + pitchRowHeight + 8}px`}>{noteDynamic.level}</span>
+            {/if}
             {#if noteTempo}
               <span class="tempo-mark" style={`left: ${entry.position * pixelsPerSixteenth}px; top: ${pitchTopMargin + (108 - note.pitches[0].midi) * pitchRowHeight - 38}px`}>Tempo {noteTempo.bpm}</span>
             {/if}
@@ -484,7 +497,7 @@
                 aria-label={`${entry.staff === 'upperStaff' ? 'Upper' : 'Lower'} staff note ${note.id}`}
                 aria-current={mode === 'timeline' && !pedalMode && !ottavaMode && !focusedGrace && entry.staff === timelineCursor.staff && timelineCursor.focusedNoteId === note.id && timelineCursor.focusedPitchIndex === pitchIndex ? 'true' : undefined}
                 style={`left: ${entry.position * pixelsPerSixteenth}px; top: ${pitchTopMargin + (108 - pitch.midi) * pitchRowHeight}px; width: ${entry.displayLength * pixelsPerSixteenth}px; --active-note-height: ${activeNoteHeight}px`}
-              >{#if note.staccato && pitchIndex === 0}<span class="staccato-mark" aria-label={note.staccato.type === 'normal' ? 'Staccato' : 'Staccatissimo'}>{note.staccato.type === 'normal' ? '•' : '▾'}</span>{/if}</div>
+              >{#if note.staccato && pitchIndex === 0}<span class="staccato-mark" aria-label={note.staccato.type === 'normal' ? 'Staccato' : 'Staccatissimo'}>{note.staccato.type === 'normal' ? '•' : '▾'}</span>{/if}{#if note.accent && pitchIndex === 0}<span class="accent-mark" aria-label="Accent">&gt;</span>{/if}{#if note.fermata && pitchIndex === 0}<span class="fermata-mark" style:top={note.staccato || note.accent ? "-36px" : "-22px"} aria-label="Fermata">𝄐</span>{/if}</div>
               {#if pitch.fingering !== undefined}
                 <span class="fingering-badge" aria-hidden="true"
                   style={`left: ${entry.position * pixelsPerSixteenth - 2}px; top: ${pitchTopMargin + (108 - pitch.midi) * pitchRowHeight + (pitchInactive ? pitchRowHeight * 0.75 : (pitchRowHeight + activeNoteHeight) / 2) + 12}px; transform: translateY(-100%)`}
@@ -632,7 +645,7 @@
   </aside>
   {/if}
   {#if !expressionModalOpen}
-    <ScorePreview {outline} {trills} {tempoChanges} {clefChanges} {slurs}
+    <ScorePreview {outline} {trills} {tempoChanges} {clefChanges} {slurs} {dynamicChanges}
       selectedNoteIds={mode !== 'timeline' || playbackPosition !== null || pedalMode || ottavaMode ? [] : selectedNotes.map(entry => entry.note.id)} activeIndex={previewActiveIndex} />
   {/if}
 </section>
@@ -640,11 +653,14 @@
 <style>
   .slur-links path { stroke: #426078; stroke-width: 2; fill: none; }
   .slur-links path.inactive { opacity: 0.4; }
+  .dynamic-mark { position: absolute; z-index: 8; color: #243b45; font: bold italic 18px Georgia, serif; line-height: 20px; pointer-events: none; }
   .tempo-mark { position: absolute; z-index: 8; white-space: nowrap; font-size: 12px; color: #304b55; background: #edf3f3d9; border-radius: 2px; padding: 2px 4px; pointer-events: none; }
   .trill-mark { position:absolute; z-index:7; height:18px; display:flex; align-items:center; color:#243b45; pointer-events:none; font:bold italic 16px Georgia,serif; }
   .trill-mark.inactive { opacity:0.7; }
   .trill-wave { flex:1; height:8px; background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8'%3E%3Cpath d='M0 4 Q2 0 4 4 T8 4' fill='none' stroke='%23243b45' stroke-width='1.5'/%3E%3C/svg%3E") repeat-x center; }
   .staccato-mark { position: absolute; left: 50%; top: -16px; transform: translateX(-50%); font-size: 20px; line-height: 14px; color: #243b45; pointer-events: none; }
+  .fermata-mark { position: absolute; left: 50%; transform: translateX(-50%); font-family: 'Segoe UI Symbol', 'Noto Music', serif; font-size: 22px; line-height: 20px; color: #243b45; pointer-events: none; }
+  .accent-mark { position: absolute; left: 50%; top: -18px; transform: translateX(-50%); font-size: 18px; font-weight: 700; line-height: 14px; color: #243b45; pointer-events: none; }
   .arpeggio-mark { position: absolute; z-index: 7; overflow: visible; fill: none; stroke: #243b45; stroke-width: 1.8px; pointer-events: none; }
   .arpeggio-mark.inactive { opacity: 0.6; }
   .timeline {
@@ -1139,6 +1155,15 @@
     top: var(--pitch-top-margin);
     bottom: var(--pitch-bottom-margin);
     background: rgba(0, 0, 0, 0.06);
+    pointer-events: none;
+  }
+
+  .tuplet-column {
+    position: absolute;
+    z-index: 0;
+    top: var(--pitch-top-margin);
+    bottom: var(--pitch-bottom-margin);
+    background: rgba(52, 132, 220, 0.14);
     pointer-events: none;
   }
 

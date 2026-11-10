@@ -25,7 +25,7 @@ namespace NoteContinuation {
       return undefined;
     }
 
-    if (!isTied && next.note.arpeggio) return undefined;
+    if (!isTied && (next.note.arpeggio || current.note.fermata)) return undefined;
     if (!isTied && (current.note.tieTo !== undefined || next.note.tieFrom !== undefined)) return undefined;
     const updated = ScoreNotes.map(project, new Set([current.note.id, next.note.id]), (note) => {
       const copy = { ...note };
@@ -49,7 +49,7 @@ namespace NoteContinuation {
   }
   export function after(project: ScoreProject, target: NoteTarget, value: NoteValue, tied: boolean): NoteTimeResult | undefined {
     const selected = NoteTargets.resolve(project, target);
-    if (!selected || !selected.note.pitches.length || (tied && selected.note.tieTo)) return undefined;
+    if (!selected || !selected.note.pitches.length || (tied && (selected.note.tieTo || selected.note.fermata))) return undefined;
     if (!tied && (selected.note.beforeGraceNotes?.length || selected.note.arpeggio) && value.type === '32nd') return undefined;
     const pitchIndex = target.pitchIndex !== null && selected.note.pitches[target.pitchIndex] ? target.pitchIndex : 0;
     const end = MusicalTime.addNumbers(MusicalTime.addNumbers(selected.measureStartSixteenths, selected.positionSixteenths), selected.lengthSixteenths);
@@ -61,6 +61,7 @@ namespace NoteContinuation {
       return {        
 ...note, pitches: selected.note.pitches.map(pitch => ({ ...pitch })),
         ...(tied ? { tieFrom: selected.note.id } : {
+          ...(selected.note.fermata ? { fermata: { ...selected.note.fermata } } : {}),
           ...(selected.note.arpeggio ? { arpeggio: { ...selected.note.arpeggio } } : {}),
           ...(selected.note.beforeGraceNotes?.length ? { beforeGraceNotes: selected.note.beforeGraceNotes.map(grace => ({ ...grace, id: 'grace-' + crypto.randomUUID(), value: { ...grace.value }, pitches: grace.pitches.map(pitch => ({ ...pitch })) })) } : {}),
           ...(selected.note.gracePerformance ? { gracePerformance: { ...selected.note.gracePerformance } } : {})

@@ -1,5 +1,7 @@
 import MusicalTime from '../theory/musical-time.ts';
 import ScoreVoice from './score-voice.ts';
+import ScoreFermata from './score-fermata.ts';
+import ScoreDynamics from './score-dynamics.ts';
 import type { MeasureLength, NoteValue, PianoNote, PianoVoiceElement, ScoreProject } from './types.ts';
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -23,9 +25,13 @@ function isNote(value: unknown): value is PianoNote {
       (pitch.substitutionFingering === undefined ||
         isIntegerIn(pitch.substitutionFingering, 1, 5) && pitch.fingering !== undefined))) return false;
   if (value.tieFrom !== undefined && !isId(value.tieFrom) || value.tieTo !== undefined && !isId(value.tieTo)) return false;
+  if (value.fermata !== undefined && (!ScoreFermata.validate(value.fermata) || value.tieTo !== undefined)) return false;
   if (value.staccato !== undefined && (!isRecord(value.staccato) ||
     !['normal', 'staccatissimo'].includes(String(value.staccato.type)) ||
     typeof value.staccato.lengthRatio !== 'number' || value.staccato.lengthRatio < 0.1 || value.staccato.lengthRatio > 0.9)) return false;
+  if (value.accent !== undefined && (!isRecord(value.accent) || typeof value.accent.velocityRate !== 'number' ||
+    !Number.isFinite(value.accent.velocityRate) || value.accent.velocityRate < 1 || value.accent.velocityRate > 2 ||
+    Math.abs(value.accent.velocityRate * 10 - Math.round(value.accent.velocityRate * 10)) > 1e-8)) return false;
   if (value.arpeggio !== undefined && (!isRecord(value.arpeggio) ||
     !['normal', 'down'].includes(String(value.arpeggio.type)) ||
     typeof value.arpeggio.spreadRatio !== 'number' || value.arpeggio.spreadRatio < 0.1 || value.arpeggio.spreadRatio > 1 ||
@@ -119,6 +125,8 @@ namespace ScoreProjectValidator {
       isRecord(item) && isId(item.id) && isId(item.startNoteId) && isId(item.endNoteId)))) return false;
     if (value.tempoChanges !== undefined && (!Array.isArray(value.tempoChanges) || !value.tempoChanges.every(item =>
       isRecord(item) && isId(item.noteId) && isIntegerIn(item.bpm, 10, 400)))) return false;
+    if (value.dynamicChanges !== undefined && (!Array.isArray(value.dynamicChanges) || !value.dynamicChanges.every(item =>
+      isRecord(item) && isId(item.noteId) && ScoreDynamics.isLevel(item.level)))) return false;
     if (value.clefChanges !== undefined && (!Array.isArray(value.clefChanges) || !value.clefChanges.every(item =>
       isRecord(item) && isId(item.noteId) && ['treble', 'bass'].includes(String(item.clef))))) return false;
     if (value.trills !== undefined && (!Array.isArray(value.trills) || !value.trills.every(item =>

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onDestroy, onMount } from 'svelte';
+  import { onDestroy, onMount, untrack } from 'svelte';
   import ScoreTimeline from "./domain/score/score-timeline.ts";
   import ScoreProjectFactory from "./domain/score/score-project.ts";
   import ScoreKey from "./domain/score/score-key.ts";
@@ -113,6 +113,10 @@
 
   const initialProject = ScoreProjectFactory.create();
   let project = $state<ScoreProject>(initialProject);
+  $effect(() => {
+    const revision = project;
+    untrack(() => playback?.prepare(revision));
+  });
   let currentProjectFile = $state<ScoreProjectFileController.Handle | null>(null);
   let savedProjectFingerprint = $state(ScoreProjectFileController.fingerprint(initialProject));
   let fileOperationInProgress = $state(false);
@@ -787,7 +791,7 @@
       {playbackPosition}
       playbackActive={playbackPosition !== null}
       expressionModalOpen={noteSettings !== null}
-      tempoChanges={project.tempoChanges} clefChanges={project.clefChanges}
+      tempoChanges={project.tempoChanges} clefChanges={project.clefChanges} dynamicChanges={project.dynamicChanges}
       slurs={project.slurs}
       mode={mode}
     />
@@ -808,7 +812,7 @@
     onCancel={() => fingeringTextInput = null} />
 {/if}
 {#if !mcpCheckout && noteSettings}
-  <ExpressionModal target={noteSettings.target} editor={noteSettings.expression}
+  <ExpressionModal {project} target={noteSettings.target} editor={noteSettings.expression}
     tab={noteSettings.tab} changesEditor={noteSettings.changes} selectTab={(tab)=>{if(uiEditAllowed()&&noteSettings)noteSettings={...noteSettings,tab};}}
     note={ScoreTimeline.note(project.outline,noteSettings.target.noteId,noteSettings.target.staff)!.note} close={closeExpressionModal} />
 {/if}

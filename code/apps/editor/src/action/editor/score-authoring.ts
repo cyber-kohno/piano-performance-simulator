@@ -85,7 +85,7 @@ namespace ScoreAuthoring {
       const op = Input.record(operation, ['type', 'settings', 'measures'], path);
       if (op.type === 'create_score') {
         if (nextState.started || candidate.outline.length !== 2 || candidate.outline[0].type !== 'init' || candidate.outline[1].type !== 'section' ||
-          [candidate.slurs, candidate.clefChanges, candidate.tempoChanges, candidate.trills].some(items => items && items.length))
+          [candidate.slurs, candidate.clefChanges, candidate.tempoChanges, candidate.dynamicChanges, candidate.trills].some(items => items && items.length))
           Input.fail(path, 'create_score requires an empty project with only initial values and one section.', 'SCORE_NOT_EMPTY');
         const settings = Input.record(op.settings, ['meter', 'keyFifths', 'tempo'], `${path}.settings`);
         const meter = Input.array(settings.meter, 2, 2, `${path}.settings.meter`);

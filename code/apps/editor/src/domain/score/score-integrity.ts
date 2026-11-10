@@ -1,11 +1,13 @@
 import Input from './score-authoring-input.ts';
 import Validator from './score-project-validator.ts';
 import ScoreVoice from './score-voice.ts';
+import ScoreFermata from './score-fermata.ts';
 import ScoreSlur from './score-slur.ts';
 import ScoreTrill from './score-trill.ts';
 import ScoreArpeggio from './score-arpeggio.ts';
 import ScoreTempo from './score-tempo.ts';
 import ScoreClef from './score-clef.ts';
+import ScoreDynamics from './score-dynamics.ts';
 import MusicalTime from '../theory/musical-time.ts';
 import type { ScoreProject } from './types.ts';
 
@@ -13,6 +15,7 @@ namespace ScoreIntegrity {
   export function validate(project: ScoreProject) {
     const fail = (message: string): never => Input.fail('project', message, 'INVALID_SCORE');
     if (!Validator.isValid(project)) fail('Invalid score structure or voice duration.');
+    if (ScoreFermata.hasConflicts(project)) fail('Overlapping fermatas must have the same absolute end position.');
     const ids = new Set<string>();
     const add = (id: string) => { if (ids.has(id)) fail(`Duplicate element or expression ID: ${id}.`); ids.add(id); };
     const events = new Map<string, { position: ReturnType<typeof MusicalTime.create>; action: string; id: string }[]>();
@@ -32,6 +35,8 @@ namespace ScoreIntegrity {
             if (item.pitches.some((pitch, i) => i > 0 && pitch.midi >= item.pitches[i - 1].midi)) fail(`Pitches must be unique and descending: ${item.id}.`);
             for (const pitch of item.pitches) if (pitch.substitutionFingering && pitch.substitutionFingering === pitch.fingering) fail(`Substitution fingering must differ: ${item.id}.`);
             if (item.staccato && item.arpeggio) fail(`Staccato and arpeggio are mutually exclusive: ${item.id}.`);
+            if (item.fermata && (!ScoreFermata.validate(item.fermata) || !ScoreFermata.canApply(item))) fail(`Fermata requires a valid ratio and the last tied segment: ${item.id}.`);
+            if (item.accent && !ScoreArpeggio.isTenthInRange(item.accent.velocityRate, 1, 2)) fail(`Invalid accent rate: ${item.id}.`);
             if (item.staccato && (!ScoreArpeggio.isTenthInRange(item.staccato.lengthRatio, 0.1, 0.9) || item.tieTo)) fail(`Staccato requires a valid ratio and the last tied segment: ${item.id}.`);
             if (item.arpeggio && (!ScoreArpeggio.validate(item.arpeggio) || !ScoreArpeggio.canApply(item))) fail(`Invalid arpeggio target or settings: ${item.id}.`);
             if (item.beforeGraceNotes?.length && (item.pitches.length !== 1 || item.value.type === '32nd')) fail(`Grace notes require a single principal note longer than a 32nd: ${item.id}.`);
@@ -78,6 +83,7 @@ namespace ScoreIntegrity {
       trillTargets.add(trill.startNoteId);
     }
     if (ScoreTempo.changes(project).length !== (project.tempoChanges?.length ?? 0)) fail('Invalid tempo anchor. Remove or retarget it explicitly.');
+    if (!ScoreDynamics.isValid(project)) fail('Invalid or duplicate dynamics anchor or level.');
     if (ScoreClef.changes(project).length !== (project.clefChanges?.length ?? 0)) fail('Invalid clef anchor. Remove or retarget it explicitly.');
     if (new Set(project.tempoChanges?.map(change => change.noteId)).size !== (project.tempoChanges?.length ?? 0)) fail('Duplicate tempo anchors.');
     if (new Set(project.clefChanges?.map(change => change.noteId)).size !== (project.clefChanges?.length ?? 0)) fail('Duplicate clef anchors.');

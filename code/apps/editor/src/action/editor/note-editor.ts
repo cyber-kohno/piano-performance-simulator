@@ -8,10 +8,11 @@ import ScoreTempo from "../../domain/score/score-tempo.ts";
 import ScoreTrill from "../../domain/score/score-trill.ts";
 
 import ScoreClef from "../../domain/score/score-clef.ts";
+import ScoreDynamics from '../../domain/score/score-dynamics.ts';
 import NoteExpressions from '../../domain/score/note-expressions.ts';
 import NotePitches from '../../domain/score/note-pitches.ts';
 import ScoreNotes from '../../domain/score/score-notes.ts';
-import type { GracePerformanceSettings, KeySignature, NoteValue, PianoFingering, PianoNote, ScoreProject, TrillSettings } from "../../domain/score/types.ts";
+import type { DynamicLevel, GracePerformanceSettings, KeySignature, NoteValue, PianoFingering, PianoNote, ScoreProject, TrillSettings } from "../../domain/score/types.ts";
 import { type Clef } from "../../domain/score/score-clef.ts";
 import * as Timeline from '../../state/timeline-cursor.ts';
 import * as Grace from '../../state/grace-input.ts';
@@ -22,16 +23,19 @@ import EditTransaction, { type NormalizedRange } from './edit-transaction.ts';
 import ScorePassage, { type PassagePasteFailureReason, type ScorePassage as ScorePassageData } from '../../domain/score/score-passage.ts';
 
 export type NoteEditResult = { project: ScoreProject; cursor: Timeline.TimelineCursor };
-export type NoteSettings = Pick<PianoNote, 'staccato' | 'arpeggio'> & {
+export type NoteSettings = Pick<PianoNote, 'staccato' | 'accent' | 'fermata' | 'arpeggio'> & {
   gracePerformance?: GracePerformanceSettings;
   trill?: TrillSettings;
   tempo?: { bpm: number | null };
   clef?: { value: Clef | null };
+  dynamic?: { level: DynamicLevel | null };
 };
 /** Application actions. Legacy pure editing algorithms remain in state until stage 2. */
 namespace NoteEditor {
   function finish(before: ScoreProject, result: NoteEditResult | undefined, normalized?: NormalizedRange) {
-    return result && { ...result, project: EditTransaction.commit(before, result.project, normalized) };
+    if (!result) return undefined;
+    const project = EditTransaction.commit(before, result.project, normalized);
+    return project === before && result.project !== before ? undefined : { ...result, project };
   }
   function normalizeResult(before: ScoreProject, cursor: Timeline.TimelineCursor, result: NoteEditResult | undefined) {
     return finish(before, result, cursor.focusedNoteId && result?.cursor.focusedNoteId
@@ -101,6 +105,7 @@ namespace NoteEditor {
     const result = ScorePassage.paste(project, cursor.staff, cursor.voiceIndex, cursor.positionSixteenths, passage);
     if (!result.ok) return result;
     const committed = EditTransaction.commit(project, result.project);
+    if (committed === project && result.project !== project) return { ok: false as const, reason: 'invalid-passage' as PassagePasteFailureReason };
     const pasted = ScoreTimeline.notes(committed.outline, cursor.staff, cursor.voiceIndex)
       .filter(entry => result.noteIds.includes(entry.note.id));
     const first = pasted[0], last = pasted.at(-1);
@@ -151,15 +156,19 @@ namespace NoteEditor {
     if (!note || selected.length !== 1) return project;
     const error = validateExpressionDraft({detail:null,row:0,draft:{
       ...(settings.staccato ? {staccato:{...settings.staccato}} : {}),
+      ...(settings.accent ? {accent:{...settings.accent}} : {}),
+      ...(settings.fermata ? {fermata:{...settings.fermata}} : {}),
       ...(settings.arpeggio ? {arpeggio:{...settings.arpeggio}} : {}),
       ...(settings.gracePerformance ? {grace:{...settings.gracePerformance}} : {}),
       ...(settings.trill ? {trill:{...settings.trill}} : {}),
-    }},note);
+    }},note,project);
     if (error || settings.trill && !ScoreTrill.canApply(project,id)) return project;
     if (settings.tempo && (!ScoreTempo.anchors(project).some(anchor=>anchor.noteId===id) ||
       settings.tempo.bpm !== null && (!Number.isInteger(settings.tempo.bpm) || settings.tempo.bpm<10 || settings.tempo.bpm>400))) return project;
     if (settings.clef && (!ScoreClef.anchors(project).some(anchor=>anchor.noteId===id) ||
       settings.clef.value !== null && !['treble','bass'].includes(settings.clef.value))) return project;
+    if (settings.dynamic && (cursor.focusedGraceId || !ScoreDynamics.anchors(project).some(anchor => anchor.noteId === id) ||
+      settings.dynamic.level !== null && !ScoreDynamics.isLevel(settings.dynamic.level))) return project;
     let next = NoteExpressions.set(project,{noteId:id,staff:cursor.staff},settings);
     next = ScoreNotes.map(next,new Set([id]), current => ({
       ...current,
@@ -168,6 +177,7 @@ namespace NoteEditor {
     next = ScoreTrill.set(next, id, settings.trill);
     if (settings.tempo) next = ScoreTempo.set(next, id, settings.tempo.bpm);
     if (settings.clef) next = ScoreClef.set(next, id, settings.clef.value);
+    if (settings.dynamic) next = ScoreDynamics.set(next, id, settings.dynamic.level);
     return EditTransaction.commit(project, next);
   }
 }

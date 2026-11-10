@@ -3,6 +3,7 @@ import type { KeySignature, TimeSignature, MeasureLength, NoteValue } from '../t
 export type { KeySignature, TimeSignature, MeasureLength, NoteValue } from '../theory/notation-types.ts';
 
 export type PianoFingering = 1 | 2 | 3 | 4 | 5;
+export type DynamicLevel = 'ppp' | 'pp' | 'p' | 'mp' | 'mf' | 'f' | 'ff' | 'fff';
 export type SpellingDirection = 'up' | 'down';
 export type PianoPitch = {
   midi: number;
@@ -22,6 +23,14 @@ export type PianoGraceNote = {
 export type StaccatoSettings = {
   type: 'normal' | 'staccatissimo';
   /** Key-hold duration as a fraction of this written note's performed duration. */
+  lengthRatio: number;
+};
+export type AccentSettings = {
+  /** Multiplier applied to the note's MIDI velocity when playback support is added. */
+  velocityRate: number;
+};
+export type FermataSettings = {
+  /** Hold multiplier; overlapping notes share the union span and the highest-priority member supplies this value. */
   lengthRatio: number;
 };
 
@@ -47,6 +56,8 @@ export type PianoNote = {
   gracePerformance?: GracePerformanceSettings;
   /** Independent of future arpeggio and ornament settings. */
   staccato?: StaccatoSettings;
+  accent?: AccentSettings;
+  fermata?: FermataSettings;
   arpeggio?: ArpeggioSettings;
   id: string;
   kind: 'note';
@@ -121,6 +132,8 @@ export type ScoreProject = {
   clefChanges?: { noteId: string; clef: 'treble' | 'bass' }[];
   /** Global changes anchored to upper-staff voice-1 written notes. */
   tempoChanges?: { noteId: string; bpm: number }[];
+  /** Global dynamic state changes anchored to upper-staff voice-1 written notes. */
+  dynamicChanges?: { noteId: string; level: DynamicLevel }[];
   outline: [InitialValuesBlock, SectionBlock, ...OutlineBlock[]];
   trills?: TrillSpan[];
 };

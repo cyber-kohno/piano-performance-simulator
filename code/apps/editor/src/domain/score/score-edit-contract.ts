@@ -32,6 +32,8 @@ const settings = obj({ meter: arr(int(1, 64), 2, 2), keyFifths: int(-7, 7), temp
 const fraction = obj({ numerator: int(0, 1048576), denominator: int(1, 1048576) });
 const position = obj({ measureId: str, offset: { ...fraction, description: 'Exact offset within the measure, measured in quarter notes. 1/2 is an eighth note. Only a stop event may use the score end.' } });
 const staccato = obj({ type: en('normal', 'staccatissimo'), lengthRatio: num(0.1, 0.9) });
+const accent = { ...obj({ velocityRate: num(1, 2) }), description: 'Accent on an attacked note only (no incoming tie). velocityRate is 1.0–2.0 in steps of 0.1; UI default is 1.5. Playback velocity is not yet affected.' };
+const fermata = { ...obj({ lengthRatio: num(1, 4) }), description: 'Fermata on a pitched note/chord with no outgoing tie. All written durations and tuplets are allowed; rests and grace notes are not targets. lengthRatio is 1.0–4.0 in steps of 0.1; UI default is 2.0. Across all voices/staves, overlapping fermata note spans must share the same absolute end position. Their merged span runs from the earliest start to that common end; the lowest voice index supplies the ratio, with upper staff breaking ties. Written value or absolute timing edits remove affected fermatas, including shifted successors. Pitch/chord edits retain them. An explicit assignment after timing edits in a batch can reapply a valid fermata. Preview playback stretches the shared range globally, including other voices, rests and pedal events; the playback cursor slows by the same factor.' };
 const arpeggio = obj({ type: en('normal', 'down'), spreadRatio: num(0.1, 1), timing: num(0, 1) });
 const gracePerformance = obj({ spreadRatio: num(0.1, 1), timing: num(0, 1) });
 const grace = obj({ id: str, value, pitch, slash: { type: 'boolean' }, fingering: int(1, 5), substitutionFingering: int(1, 5) }, ['value', 'pitch', 'slash']);
@@ -49,7 +51,7 @@ namespace ScoreEditContract {
     op('set_value', { elementId: str, value }),
     op('set_rest', { noteId: str }),
     op('set_grace_notes', { noteId: str, notes: arr(grace, 0, 64), performance: nullable(gracePerformance) }, ['noteId', 'notes']),
-    op('set_note_expression', { noteId: str, staccato: nullable(staccato), arpeggio: nullable(arpeggio) }, ['noteId']),
+    op('set_note_expression', { noteId: str, staccato: nullable(staccato), accent: nullable(accent), fermata: nullable(fermata), arpeggio: nullable(arpeggio) }, ['noteId']),
     op('set_fingering', { noteId: str, graceNoteId: str, pitchIndex: int(0, 87), fingering: nullable(int(1, 5)), substitutionFingering: nullable(int(1, 5)) }, ['noteId', 'pitchIndex', 'fingering']),
     op('set_tie', { fromNoteId: str, toNoteId: nullable(str) }),
     op('set_slur', { slurId: str, startNoteId: str, endNoteId: str }, ['startNoteId', 'endNoteId']),
@@ -61,6 +63,7 @@ namespace ScoreEditContract {
     op('remove_ottava_event', { position, staff }),
     op('set_tempo_change', { noteId: str, bpm: nullable(int(10, 400)) }),
     op('set_clef_change', { noteId: str, clef: nullable(en('treble', 'bass')) }),
+    { ...op('set_dynamic_change', { noteId: str, level: nullable(en('ppp', 'pp', 'p', 'mp', 'mf', 'f', 'ff', 'fff')) }), description: 'Global dynamic state from this upper-staff voice-1 written note, including simultaneous attacks, until the next change. Tied notes, chords and tuplets are allowed; rests and grace notes are not anchors. null removes the change. Notation/state only; preview velocity is unchanged. Deleted/rested anchors are removed automatically.' },
     op('set_initial_values', { settings }),
     op('set_measure_length', { measureId: str, length }),
     { ...op('set_key_change', { beforeMeasureId: str, afterBlockId: str, keyChangeId: str, keyFifths: nullable(int(-7, 7)) }, ['keyFifths']),
@@ -77,12 +80,12 @@ namespace ScoreEditContract {
   export const fieldCoverage = {
     note: { id: ['create_score'], kind: ['create_score', 'set_rest'], value: ['set_value'], pitches: ['set_pitches'],
       tieFrom: ['set_tie'], tieTo: ['set_tie'], beforeGraceNotes: ['set_grace_notes'], gracePerformance: ['set_grace_notes'],
-      staccato: ['set_note_expression'], arpeggio: ['set_note_expression'] },
+      staccato: ['set_note_expression'], accent: ['set_note_expression'], fermata: ['set_note_expression'], arpeggio: ['set_note_expression'] },
     pitch: { midi: ['set_pitches'], spellingDirection: ['set_pitches'], fingering: ['set_fingering'], substitutionFingering: ['set_fingering'] },
     grace: { id: ['set_grace_notes'], pitches: ['set_grace_notes'], value: ['set_grace_notes'], slash: ['set_grace_notes'] },
     tuplet: { id: ['replace_voice'], kind: ['replace_voice'], actual: ['replace_voice'], normal: ['replace_voice'], baseType: ['replace_voice'], elements: ['replace_voice'] },
     project: { outline: ['append_measures', 'insert_measures', 'remove_measures', 'insert_section', 'set_key_change'],
-      slurs: ['set_slur', 'remove_slur'], trills: ['set_trill'], clefChanges: ['set_clef_change'], tempoChanges: ['set_tempo_change'] },
+      slurs: ['set_slur', 'remove_slur'], trills: ['set_trill'], clefChanges: ['set_clef_change'], tempoChanges: ['set_tempo_change'], dynamicChanges: ['set_dynamic_change'] },
     measure: { length: ['set_measure_length'], upperStaff: ['replace_voice'], lowerStaff: ['replace_voice'],
       pedalEvents: ['set_pedal_event', 'remove_pedal_event'], ottavaEvents: ['set_ottava_event', 'remove_ottava_event'] },
   } satisfies { note: Record<keyof PianoNote, string[]>; pitch: Record<keyof PianoPitch, string[]>; grace: Record<keyof PianoGraceNote, string[]>;
