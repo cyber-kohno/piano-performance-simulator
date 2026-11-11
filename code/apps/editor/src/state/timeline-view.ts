@@ -100,6 +100,26 @@ namespace TimelineView {
     return [...result].sort((left, right) => left - right);
   }
 
+  /** Keep this window stable while scrolling within the focused measure. */
+  export function focusedMeasureWindow(
+    measures: readonly HeaderMeasure[], focusedIndex: number, viewportWidth: number, neighbors = 2,
+  ) {
+    if (!measures.length) return { indices: [] as number[], start: 0, end: 0 };
+    const index = Math.max(0, Math.min(measures.length - 1, focusedIndex));
+    const focus = measures[index];
+    const width = Math.max(1, viewportWidth);
+    // Cover every possible centered viewport within this measure, including
+    // short bars on wide screens and playback traversing a long bar.
+    const covering = visibleMeasureIndices(measures, focus.start, focus.width, width);
+    const first = Math.min(covering[0] ?? index, Math.max(0, index - neighbors));
+    const last = Math.max(covering.at(-1) ?? index, Math.min(measures.length - 1, index + neighbors));
+    return {
+      indices: Array.from({ length: last - first + 1 }, (_, offset) => first + offset),
+      start: measures[first].start,
+      end: measures[last].start + measures[last].width,
+    };
+  }
+
   export function ticks(measure: HeaderMeasure, meter: TimeSignature, pixelsPerWhole: number) {
     const isCompoundMeter = meter.unit === 8 && meter.cnt >= 6 && meter.cnt % 3 === 0;
     const beatLength = isCompoundMeter ? 3 / 8 : 1 / meter.unit;

@@ -1,12 +1,13 @@
 <script lang="ts">
   import ScoreKey from "../domain/score/score-key.ts";
 
-  import { onDestroy } from 'svelte';
+  import { onDestroy, untrack } from 'svelte';
   import type { ScoreProject } from "../domain/score/types.ts";
   import type { OutlineCursor } from '../state/outline-cursor';
   import { getSelectedOutlineBlocks } from '../state/outline-cursor';
   import { getMeasureBeatDisplay } from '../state/measure-beats';
   import InitialValues from './InitialValues.svelte';
+  import OutlineView from '../state/outline-view.ts';
 
 
   let { outline, cursor, keyEditing = false, tempoEditing = false, meterEditing = false }: {
@@ -20,47 +21,80 @@
   const initialValues = $derived(outline[0].data);
   const selectedBlocks = $derived(getSelectedOutlineBlocks(outline, cursor));
   const selectedBlockIds = $derived(new Set(selectedBlocks.length > 1 ? selectedBlocks.map(block => block.id) : []));
-  let blocksViewport: HTMLDivElement;
+  let blocksViewport = $state<HTMLDivElement>();
+  let scrollTop = $state(0);
+  let viewportHeight = $state(0);
+  let measuredHeights = $state<ReadonlyMap<string, number>>(new Map());
+  const layout = $derived(OutlineView.layout(outline, measuredHeights));
+  const visibleRows = $derived(OutlineView.visibleRows(layout, scrollTop, viewportHeight || 600, cursor.blockId));
   let scrollTimers: number[] = [];
+  let scrollDestination: number | undefined;
+
+  function syncScroll() { if (blocksViewport) scrollTop = blocksViewport.scrollTop; }
+  $effect(() => {
+    const viewport = blocksViewport;
+    if (!viewport) return;
+    let width = viewport.clientWidth;
+    const resize = () => {
+      viewportHeight = viewport.clientHeight;
+      if (Math.abs(width - viewport.clientWidth) > 0.5) {
+        width = viewport.clientWidth;
+        measuredHeights = new Map();
+      }
+      syncScroll();
+    };
+    const observer = new ResizeObserver(resize);
+    observer.observe(viewport);
+    resize();
+    return () => observer.disconnect();
+  });
+
+  function measureRow(node: HTMLDivElement, blockId: string) {
+    const observer = new ResizeObserver(() => {
+      const height = node.getBoundingClientRect().height;
+      if (height > 0 && Math.abs((measuredHeights.get(blockId) ?? 0) - height) > 0.5) {
+        measuredHeights = new Map(measuredHeights).set(blockId, height);
+      }
+    });
+    observer.observe(node);
+    return { destroy: () => observer.disconnect() };
+  }
 
   function scrollFocusedBlockIntoView(blockId: string) {
     const viewport = blocksViewport;
-    const block = viewport?.querySelector<HTMLElement>(`[data-block-id="${blockId}"]`);
-    if (!viewport || !block) return;
-
-    const viewportRect = viewport.getBoundingClientRect();
-    const blockRect = block.getBoundingClientRect();
-    const requestedTop = viewport.scrollTop + blockRect.top - viewportRect.top
-      - viewport.clientHeight / 2 + blockRect.height / 2;
-    const top = Math.max(0, Math.min(requestedTop, viewport.scrollHeight - viewport.clientHeight));
-    if (Math.abs(top - viewport.scrollTop) < 1) return;
+    if (!viewport) return;
+    const top = OutlineView.focusScrollTop(layout, blockId, viewport.clientHeight);
+    if (top === undefined || (scrollDestination !== undefined && Math.abs(top - scrollDestination) < 0.5)) return;
+    scrollDestination = top;
 
     for (const timer of scrollTimers) window.clearTimeout(timer);
     scrollTimers = [];
+    if (Math.abs(top - viewport.scrollTop) < 1) return;
 
     // Match Scorehack's 15 increments at 10ms intervals for held-key navigation.
     const divisionCount = 15;
     const step = (top - viewport.scrollTop) / divisionCount;
     for (let division = 0; division < divisionCount; division += 1) {
       const timer = window.setTimeout(() => {
-        viewport.scrollTop += step;
+        if (division === divisionCount - 1) viewport.scrollTop = top;
+        else viewport.scrollTop += step;
+        syncScroll();
       }, division * 10);
       scrollTimers.push(timer);
     }
   }
 
   $effect(() => {
-    scrollFocusedBlockIntoView(cursor.blockId);
+    const blockId = cursor.blockId;
+    layout;
+    viewportHeight;
+    untrack(() => scrollFocusedBlockIntoView(blockId));
   });
 
   onDestroy(() => {
     for (const timer of scrollTimers) window.clearTimeout(timer);
   });
 
-  function getMeasureNumber(blockId: string): number {
-    const blockIndex = outline.findIndex((block) => block.id === blockId);
-    return outline.slice(0, blockIndex + 1).filter((block) => block.type === 'measure').length;
-  }
 </script>
 
 <aside class="outline-panel" aria-label="Outline panel">
@@ -71,8 +105,11 @@
     </div>
   </section>
   <section class="outline" aria-label="Outline">
-    <div class="blocks" bind:this={blocksViewport}>
-      {#each outline as block (block.id)}
+    <div class="blocks" bind:this={blocksViewport} onscroll={syncScroll}>
+      <div class="block-space" style={`height: ${layout.totalHeight + 15}px`}>
+      {#each visibleRows as item (item.block.id)}
+        {@const block = item.block}
+        <div class="virtual-block" use:measureRow={block.id} style={`top: ${item.top}px; padding-top: ${item.gap}px`}>
         {#if block.type === 'init'}
           <section
             class="initial-block"
@@ -111,11 +148,11 @@
             class:range-selected={selectedBlockIds.has(block.id)}
             data-block-id={block.id}
             class:focused={cursor.blockId === block.id}
-            aria-label={`Measure ${getMeasureNumber(block.id)}`}
+            aria-label={`Measure ${item.measureNumber}`}
             aria-current={cursor.blockId === block.id ? 'true' : undefined}
           >
             <div class="measure-heading">
-              <h3>Measure {getMeasureNumber(block.id)}</h3>
+              <h3>Measure {item.measureNumber}</h3>
               <span>Beats {beats.actualLabel}/{beats.standardBeats}</span>
             </div>
             <div class="beat-chips" role="img" aria-label={`${beats.actualLabel} of ${beats.standardBeats} beats`}>
@@ -125,13 +162,15 @@
             </div>
           </section>
         {/if}
+        </div>
       {/each}
+      </div>
     </div>
   </section>
 </aside>
 
 <style>
-  .key-change-block { position: relative; margin-top: 6px; padding: 8px 10px; border-left: 3px solid #8876a4; background: #e6e0ee; color: #40565c; }
+  .key-change-block { position: relative; padding: 8px 10px; border-left: 3px solid #8876a4; background: #e6e0ee; color: #40565c; }
   .outline-panel {
     display: grid;
     grid-template-rows: var(--outline-info-height) minmax(0, 1fr);
@@ -165,16 +204,12 @@
     min-height: 0;
     overflow: hidden;
     padding: 0 12px 12px;
+    overflow-anchor: none;
   }
-
-  .blocks::after {
-    display: block;
-    height: 15px;
-    content: '';
-  }
+  .block-space { position: relative; }
+  .virtual-block { position: absolute; left: 0; right: 0; }
 
   .initial-block {
-    margin-top: 16px;
     padding: 12px;
     border: 1px solid #7caaa2;
     border-radius: 4px;
@@ -188,7 +223,6 @@
   }
 
   .section-block {
-    margin-top: 16px;
     padding: 8px 4px;
     border-bottom: 3px solid #497e77;
     color: #355f59;
@@ -202,7 +236,6 @@
 
   .measure-block {
     position: relative;
-    margin-top: 6px;
     padding: 8px 10px;
     border-left: 3px solid #8299a0;
     background: #e8edf0;

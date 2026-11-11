@@ -54,7 +54,6 @@
   let pianoRollViewport = $state<HTMLElement>();
   let pitchScrollViewport = $state<HTMLDivElement>();
   let pedalViewport = $state<HTMLElement>();
-  let timelineScrollLeft = $state(0);
   let timelineScrollTop = $state(0);
   let timelineViewportWidth = $state(0);
   let timelineViewportHeight = $state(0);
@@ -73,7 +72,6 @@
     if (measureRow && Math.abs(measureRow.scrollLeft - left) > 1) measureRow.scrollLeft = left;
     if (pedalViewport && Math.abs(pedalViewport.scrollLeft - left) > 1) pedalViewport.scrollLeft = left;
     if (pitchScrollViewport && Math.abs(pitchScrollViewport.scrollTop - top) > 1) pitchScrollViewport.scrollTop = top;
-    timelineScrollLeft = left;
     timelineScrollTop = top;
     timelineViewportWidth = roll.clientWidth;
     timelineViewportHeight = roll.clientHeight;
@@ -99,7 +97,6 @@
       const isTail = division === divisionCount - 1;
       const timer = window.setTimeout(() => {
         roll.scrollLeft += step;
-        timelineScrollLeft = roll.scrollLeft;
         if (isTail || Math.abs(header.scrollLeft - roll.scrollLeft) > 1) header.scrollLeft = roll.scrollLeft;
       }, division * 10);
       scrollTimers.push(timer);
@@ -216,11 +213,13 @@
   const headerMeasures = $derived(TimelineView.layout(outline, pixelsPerWhole));
   const totalTimelineWidth = $derived(headerMeasures.length
     ? headerMeasures.at(-1)!.start + headerMeasures.at(-1)!.width : 0);
-  const requiredMeasureIndices = $derived(statusMeasureNumber === null ? [] : [statusMeasureNumber - 1]);
-  const visibleMeasureIndices = $derived(TimelineView.visibleMeasureIndices(
-    headerMeasures, timelineScrollLeft, Math.max(1, timelineViewportWidth || 960),
-    Math.max(480, timelineViewportWidth), requiredMeasureIndices,
+  // Playback and keyboard navigation update this only when their measure changes.
+  // A trailing section (or the timeline end) uses the last measure as its anchor.
+  const renderMeasureIndex = $derived(statusMeasureNumber === null ? Math.max(0, measures.length - 1) : statusMeasureNumber - 1);
+  const renderWindow = $derived(TimelineView.focusedMeasureWindow(
+    headerMeasures, renderMeasureIndex, timelineViewportWidth || 960,
   ));
+  const visibleMeasureIndices = $derived(renderWindow.indices);
   const visiblePitchBounds = $derived.by(() => {
     const viewportHeight = timelineViewportHeight || 720;
     return {
@@ -228,20 +227,25 @@
       max: Math.max(21, Math.min(108, 108 - Math.floor((timelineScrollTop - pitchTopMargin) / pitchRowHeight) + 1)),
     };
   });
-  const visibleMeasures = $derived.by(() => visibleMeasureIndices.map(index => {
+  const measureContents = $derived.by(() => visibleMeasureIndices.map(index => {
     const measure = measures[index];
     const layout = headerMeasures[index];
-    const notes = TimelineView.notesForMeasure(measure, notesWithVisualGap, independentNoteGapPixels, pixelsPerSixteenth)
-      .filter(entry => entry.note.pitches.some(pitch => pitch.midi >= visiblePitchBounds.min && pitch.midi <= visiblePitchBounds.max) ||
-        (entry.note.beforeGraceNotes ?? []).some(grace => grace.pitches.some(pitch => pitch.midi >= visiblePitchBounds.min && pitch.midi <= visiblePitchBounds.max)));
+    const notes = TimelineView.notesForMeasure(measure, notesWithVisualGap, independentNoteGapPixels, pixelsPerSixteenth);
     const voice = measure.data[timelineCursor.staff].voices[timelineCursor.voiceIndex];
     const tuplets = voice ? ScoreVoice.locate(voice, measure.data.length)
       .filter(entry => entry.element.kind === 'tuplet')
       .map(entry => ({ start: entry.positionSixteenths, length: entry.lengthSixteenths, id: entry.element.id })) : [];
     return { index, measure, layout, notes, tuplets, ticks: TimelineView.ticks(layout, outline[0].data.timeSignature, pixelsPerWhole) };
   }));
-  const visibleTimelineStart = $derived(Math.max(0, timelineScrollLeft - Math.max(480, timelineViewportWidth)));
-  const visibleTimelineEnd = $derived(timelineScrollLeft + Math.max(1, timelineViewportWidth || 960) + Math.max(480, timelineViewportWidth));
+  // Note columns occupy the whole pitch range, even when every pitch is offscreen.
+  // Only pitch-dependent graphics may be culled by the vertical viewport.
+  const visibleMeasures = $derived(measureContents.map(item => ({ ...item,
+    visibleNotes: item.notes.filter(entry =>
+      entry.note.pitches.some(pitch => pitch.midi >= visiblePitchBounds.min && pitch.midi <= visiblePitchBounds.max) ||
+      (entry.note.beforeGraceNotes ?? []).some(grace => grace.pitches.some(pitch => pitch.midi >= visiblePitchBounds.min && pitch.midi <= visiblePitchBounds.max))),
+  })));
+  const visibleTimelineStart = $derived(renderWindow.start);
+  const visibleTimelineEnd = $derived(renderWindow.end);
   const visibleTiePaths = $derived(tiePaths.filter(path => path.x2 >= visibleTimelineStart && path.x1 <= visibleTimelineEnd));
   const visibleSlurPaths = $derived(slurPaths.filter(path => path.x2 >= visibleTimelineStart && path.x1 <= visibleTimelineEnd));
   const visiblePedalEvents = $derived(pedalEvents.filter(event => {
@@ -271,7 +275,7 @@
       if (entry?.measure.id === selectedBlockId) focusPosition += entry.lengthSixteenths * pixelsPerSixteenth / 2;
     }
 
-    const viewportWidth = Math.min(header.clientWidth, roll.clientWidth);
+    const viewportWidth = Math.min(header.clientWidth, timelineViewportWidth || roll.clientWidth);
     const maxScrollLeft = Math.max(0, totalTimelineWidth + viewportWidth / 2 - viewportWidth);
     const scrollLeft = Math.max(0, Math.min(maxScrollLeft, focusPosition - viewportWidth / 2));
     animateTimelineScroll(scrollLeft);
@@ -445,6 +449,18 @@
             ></div>
           {/each}
           {#each item.notes as entry (entry.note.id)}
+            {#if playbackPosition === null && mode === 'timeline' && !pedalMode && entry.staff === timelineCursor.staff && entry.voiceIndex === timelineCursor.voiceIndex}
+              <div
+                class="note-focus-column"
+                class:focused={selectedNoteIds.has(entry.note.id) && !focusedGrace}
+                class:range-selected={selectedNoteIds.has(entry.note.id) && selectedNotes.length > 1}
+                class:range-endpoint={selectedNotes.length > 1 && timelineCursor.focusedNoteId === entry.note.id}
+                style={`left: ${entry.position * pixelsPerSixteenth}px; width: ${entry.length * pixelsPerSixteenth}px`}
+                aria-hidden="true"
+              ></div>
+            {/if}
+          {/each}
+          {#each item.visibleNotes as entry (entry.note.id)}
             {@const note = entry.note}
             {#if trillNotes.has(note.id)}
               <div class="trill-mark" role="img" aria-label="Trill"
@@ -461,16 +477,6 @@
             {/if}
             {#if noteTempo}
               <span class="tempo-mark" style={`left: ${entry.position * pixelsPerSixteenth}px; top: ${pitchTopMargin + (108 - note.pitches[0].midi) * pitchRowHeight - 38}px`}>Tempo {noteTempo.bpm}</span>
-            {/if}
-            {#if playbackPosition === null && mode === 'timeline' && !pedalMode && entry.staff === timelineCursor.staff && entry.voiceIndex === timelineCursor.voiceIndex}
-              <div
-                class="note-focus-column"
-                class:focused={selectedNoteIds.has(note.id) && !focusedGrace}
-                class:range-selected={selectedNoteIds.has(note.id) && selectedNotes.length > 1}
-                class:range-endpoint={selectedNotes.length > 1 && timelineCursor.focusedNoteId === note.id}
-                style={`left: ${entry.position * pixelsPerSixteenth}px; width: ${entry.length * pixelsPerSixteenth}px`}
-                aria-hidden="true"
-              ></div>
             {/if}
             {#each note.pitches as pitch, pitchIndex (`${note.id}-${pitch.midi}`)}
               {@const pitchInactive = pedalMode || mode === 'outline' || entry.staff !== timelineCursor.staff || entry.voiceIndex !== timelineCursor.voiceIndex}
