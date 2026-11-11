@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onDestroy } from 'svelte';
+  import { onDestroy, untrack } from 'svelte';
   import ScoreSlur from "../domain/score/score-slur.ts";
 
   import ScoreTrill from "../domain/score/score-trill.ts";
@@ -294,6 +294,26 @@
       pitchTopMargin + pitchRowCenter - pitchScrollViewport.clientHeight / 2,
     ));
     animateTimelineVerticalScroll(rollTop, pitchTop);
+  });
+
+  $effect(() => {
+    const blockId = cursor.blockId;
+    const roll = pianoRollViewport;
+    const pitch = pitchScrollViewport;
+    if (mode !== 'outline' || !roll || !pitch) return;
+    // Scroll events and score edits must not pull the viewport back after the
+    // user has adjusted it. Only entering outline mode / changing focus fits it.
+    untrack(() => {
+      for (const timer of verticalScrollTimers) window.clearTimeout(timer);
+      verticalScrollTimers = [];
+      if (playbackActive) return;
+      const measure = outline.find(block => block.id === blockId);
+      if (measure?.type !== 'measure') return;
+      const top = TimelineView.bestPitchScrollTop(TimelineView.measurePitches(measure), roll.scrollTop,
+        roll.clientHeight, Math.max(0, roll.scrollHeight - roll.clientHeight), pitchTopMargin, pitchRowHeight);
+      if (Math.abs(top - roll.scrollTop) < 1) return;
+      animateTimelineVerticalScroll(top, Math.max(0, Math.min(pitch.scrollHeight - pitch.clientHeight, top)));
+    });
   });
 
   function pitchLaneBackground(measureId: string) {

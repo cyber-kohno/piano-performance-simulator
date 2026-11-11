@@ -48,7 +48,7 @@ test('Changes Dynamics uses inherited mf/levels, clamps eight choices and applie
   assert.deepEqual(press(p, editor, 'Escape'), { editor: null }); assert.deepEqual(p, original);
   const saved = NoteEditor.configure(p, c, press(p, editor, 'Enter', true).commit);
   assert.equal(NoteSettings.open(saved, c).changes.dynamic, 'fff');
-  const inherited = Dynamics.set(saved, a.note.id, 'p');
+  const inherited = Dynamics.set(saved, a.note.id, 'p', 75);
   assert.equal(Dynamics.at(inherited, 0), 'p'); assert.equal(Dynamics.at(inherited, 4), 'fff');
   editor = NoteSettings.open(inherited, c); editor.tab = 'changes'; editor.changes.row = 2;
   editor = press(inherited, editor, 'Delete').editor;
@@ -61,34 +61,34 @@ test('Changes Dynamics uses inherited mf/levels, clamps eight choices and applie
 test('upper voice 1 only; rests/graces are excluded and tie continuation, short/dotted/tuplet notes are allowed', () => {
   const p = fixture(), [a, b] = notes(p);
   a.note.tieTo = b.note.id; b.note.tieFrom = a.note.id; b.note.pitches = structuredClone(a.note.pitches);
-  for (const entry of [a, b]) assert.equal(Dynamics.set(p, entry.note.id, 'f').dynamicChanges[0].level, 'f');
+  for (const entry of [a, b]) assert.equal(Dynamics.set(p, entry.note.id, 'f', 98).dynamicChanges[0].level, 'f');
   const low = Timeline.notes(p.outline, 'lowerStaff')[0];
-  assert.equal(Dynamics.set(p, low.note.id, 'p'), p);
+  assert.equal(Dynamics.set(p, low.note.id, 'p', 75), p);
   const editor = { ...createChangesEditor(undefined, 120, undefined, 'bass'), row: 2 };
   assert.equal(controlChangesEditor(editor, 'Enter', false, true, false), editor);
-  assert.equal(NoteEditor.configure(p, cursor(p, low.note.id, 'lowerStaff'), { dynamic: { level: 'p' } }), p);
+  assert.equal(NoteEditor.configure(p, cursor(p, low.note.id, 'lowerStaff'), { dynamic: { level: 'p', velocity: 75 } }), p);
   const voiced = NoteEditor.addVoice(p, cursor(p, a.note.id));
   const voice2 = NoteEditor.add(voiced, { ...createTimelineCursor(), voiceIndex: 1, pitch: 76 }, 0, 76);
-  assert.equal(Dynamics.set(voice2.project, voice2.cursor.focusedNoteId, 'f'), voice2.project);
+  assert.equal(Dynamics.set(voice2.project, voice2.cursor.focusedNoteId, 'f', 98), voice2.project);
   const grace = NoteEditor.addGrace(p, cursor(p, a.note.id));
-  assert.equal(Dynamics.set(grace.project, Timeline.note(grace.project.outline, a.note.id).note.beforeGraceNotes[0].id, 'f'), grace.project);
+  assert.equal(Dynamics.set(grace.project, Timeline.note(grace.project.outline, a.note.id).note.beforeGraceNotes[0].id, 'f', 98), grace.project);
   const graceEditor = NoteSettings.open(grace.project, grace.cursor); graceEditor.tab = 'changes'; graceEditor.changes.row = 2;
   assert.equal(press(grace.project, graceEditor, 'Enter').editor.changes.dynamic, null);
-  assert.equal(NoteEditor.configure(grace.project, grace.cursor, { dynamic: { level: 'f' } }), grace.project);
+  assert.equal(NoteEditor.configure(grace.project, grace.cursor, { dynamic: { level: 'f', velocity: 98 } }), grace.project);
   const rest = p.outline[2].data.upperStaff.voices[0].elements.at(-1);
-  assert.equal(Dynamics.set(p, rest.id, 'f'), p);
+  assert.equal(Dynamics.set(p, rest.id, 'f', 98), p);
   const fresh = fixture(), single = notes(fresh)[0];
   const dotted = NoteEditor.setValue(fresh, cursor(fresh, single.note.id), { type: 'eighth', dots: 1 });
-  assert.equal(Dynamics.set(dotted.project, single.note.id, 'mp').dynamicChanges[0].level, 'mp');
+  assert.equal(Dynamics.set(dotted.project, single.note.id, 'mp', 82).dynamicChanges[0].level, 'mp');
   const group = NoteEditor.convertTuplet(fresh, cursor(fresh, single.note.id));
-  assert.equal(Dynamics.set(group.project, single.note.id, 'pp').dynamicChanges[0].level, 'pp');
+  assert.equal(Dynamics.set(group.project, single.note.id, 'pp', 62).dynamicChanges[0].level, 'pp');
   const short = NoteEditor.setValue(fresh, cursor(fresh, single.note.id), { type: '32nd', dots: 0 });
-  assert.equal(Dynamics.set(short.project, single.note.id, 'ppp').dynamicChanges[0].level, 'ppp');
+  assert.equal(Dynamics.set(short.project, single.note.id, 'ppp', 48).dynamicChanges[0].level, 'ppp');
 });
 
 test('dynamic changes follow edits, survive tie normalization and are removed on deletion without being duplicated', () => {
   const p = fixture(), [a, b] = notes(p);
-  let saved = Dynamics.set(p, a.note.id, 'p'); saved = Dynamics.set(saved, b.note.id, 'f');
+  let saved = Dynamics.set(p, a.note.id, 'p', 75); saved = Dynamics.set(saved, b.note.id, 'f', 98);
   const moved = NoteEditor.move(saved, cursor(saved, b.note.id), 1).project;
   assert.equal(Dynamics.changes(moved).find(change => change.noteId === b.note.id).position, 5);
   const pitched = NoteEditor.movePitch(saved, cursor(saved, b.note.id), 1).project;
@@ -106,7 +106,7 @@ test('dynamic changes follow edits, survive tie normalization and are removed on
   assert.equal(Dynamics.at(deleted, 4), 'p');
   // A change in the middle of a tie must remain an explicit boundary.
   a.note.tieTo = b.note.id; b.note.tieFrom = a.note.id; b.note.pitches = structuredClone(a.note.pitches);
-  const tied = Dynamics.set(p, b.note.id, 'ff');
+  const tied = Dynamics.set(p, b.note.id, 'ff', 108);
   const normalized = NoteEditor.normalizeTie(tied, cursor(tied, b.note.id)).project;
   assert.equal(Dynamics.changes(normalized)[0].position, 4);
   assert.equal(Dynamics.at(normalized, 4), 'ff');
@@ -114,19 +114,19 @@ test('dynamic changes follow edits, survive tie normalization and are removed on
 
 test('MusicXML emits one direction at the exact note offset with no playback sound or note/clef rewrite', () => {
   const p = fixture(), b = notes(p)[1], baseline = preview(p);
-  const saved = Dynamics.set(p, b.note.id, 'mf'), xml = preview(saved);
+  const saved = Dynamics.set(p, b.note.id, 'mf', 88), xml = preview(saved);
   assert.match(xml, /<direction placement="below"><direction-type><dynamics><mf\/><\/dynamics><\/direction-type><offset>8<\/offset><staff>1<\/staff><\/direction>/);
   assert.equal((xml.match(/<dynamics>/g) ?? []).length, 1); assert.ok(!xml.includes('<sound dynamics='));
   assert.deepEqual(xml.match(/<note>[\s\S]*?<\/note>/g), baseline.match(/<note>[\s\S]*?<\/note>/g));
   assert.deepEqual(xml.match(/<clef[\s\S]*?<\/clef>/g), baseline.match(/<clef[\s\S]*?<\/clef>/g));
   assert.ok(!preview(saved, 3).includes('<dynamics>'), 'clipped previews do not invent new marks');
-  for (const level of Dynamics.levels) assert.ok(preview(Dynamics.set(p, b.note.id, level)).includes(`<${level}/>`));
+  for (const level of Dynamics.levels) assert.ok(preview(Dynamics.set(p, b.note.id, level, Dynamics.defaultVelocities[level])).includes(`<${level}/>`));
 });
 
 test('MCP sets, reads inherited state, removes and automatically cleans deleted/rested anchors atomically', () => {
   const p = fixture(), [a, b] = notes(p);
-  let saved = edit(p, [{ type: 'set_dynamic_change', noteId: a.note.id, level: 'p' },
-    { type: 'set_dynamic_change', noteId: b.note.id, level: 'ff' }]).project;
+  let saved = edit(p, [{ type: 'set_dynamic_change', noteId: a.note.id, level: 'p', velocity: 75 },
+    { type: 'set_dynamic_change', noteId: b.note.id, level: 'ff', velocity: 108 }]).project;
   assert.equal(Reader.overview(saved).expressionCounts.dynamicChanges, 2);
   assert.equal(Reader.range(saved, { firstMeasure: 2, measureCount: 1 }).measures[0].dynamicAtStart, 'ff');
   assert.equal(Reader.range(saved, { firstMeasure: 1, measureCount: 1 }).dynamicChanges.length, 2);
@@ -137,25 +137,26 @@ test('MCP sets, reads inherited state, removes and automatically cleans deleted/
   const rested = edit(saved, [{ type: 'set_rest', noteId: b.note.id }]);
   assert.equal(Dynamics.at(rested.project, 4), 'p');
   assert.ok(rested.summary.removedAnchors.some(anchor => anchor.kind === 'dynamicChanges' && anchor.noteId === b.note.id));
-  saved = edit(saved, [{ type: 'set_dynamic_change', noteId: b.note.id, level: null }]).project;
+  saved = edit(saved, [{ type: 'set_dynamic_change', noteId: b.note.id, level: null, velocity: 88 }]).project;
   assert.equal(Dynamics.at(saved, 8), 'p');
   const baseline = structuredClone(saved), low = Timeline.notes(saved.outline, 'lowerStaff')[0];
   for (const operation of [
-    { type: 'set_dynamic_change', noteId: low.note.id, level: 'f' },
+    { type: 'set_dynamic_change', noteId: low.note.id, level: 'f', velocity: 98 },
     { type: 'set_dynamic_change', noteId: a.note.id, level: 'sfz' },
-    { type: 'set_dynamic_change', noteId: 'missing', level: 'f' },
+    { type: 'set_dynamic_change', noteId: 'missing', level: 'f', velocity: 98 },
   ]) assert.throws(() => edit(saved, [operation]));
   assert.deepEqual(saved, baseline);
 });
 
-test('saved dynamics retain notation/state and coexist with expressions while preview playback stays unchanged', () => {
+test('saved dynamics retain notation/state and coexist with expressions and affect preview playback', () => {
   const p = fixture(), a = notes(p)[0];
   const saved = NoteEditor.configure(p, cursor(p, a.note.id), {
-    dynamic: { level: 'ppp' }, accent: { velocityRate: 1.5 }, staccato: { type: 'normal', lengthRatio: 0.5 }, fermata: { lengthRatio: 2 },
+    dynamic: { level: 'ppp', velocity: 48 }, accent: { velocityOffset: 18 }, staccato: { type: 'normal', lengthRatio: 0.5 }, fermata: { lengthRatio: 2 },
   });
   assert.equal(Dynamics.at(saved, 0), 'ppp'); Integrity.validate(saved);
   const without = { ...saved, dynamicChanges: [] };
-  assert.deepEqual(Plan.create(saved, 0), Plan.create(without, 0));
+  assert.equal(Plan.create(saved, 0).events.find(e => e.sourceNoteId === a.note.id).velocity, 66);
+  assert.equal(Plan.create(without, 0).events.find(e => e.sourceNoteId === a.note.id).velocity, 106);
   const restored = JSON.parse(JSON.stringify(saved));
   assert.equal(Validator.isValid(restored), true); assert.equal(Dynamics.isValid(restored), true);
   assert.deepEqual(restored.dynamicChanges, saved.dynamicChanges);
@@ -163,6 +164,25 @@ test('saved dynamics retain notation/state and coexist with expressions while pr
   assert.equal(Validator.isValid(malformed), false);
   const duplicate = { ...saved, dynamicChanges: [...saved.dynamicChanges, ...saved.dynamicChanges] };
   assert.equal(Dynamics.isValid(duplicate), false); assert.throws(() => Integrity.validate(duplicate));
-  const missing = { ...saved, dynamicChanges: [{ noteId: 'missing', level: 'f' }] };
+  const missing = { ...saved, dynamicChanges: [{ noteId: 'missing', level: 'f', velocity: 98 }] };
   assert.equal(Dynamics.isValid(missing), false);
+});
+
+
+test('absolute base velocity ignores notation order, applies across staves and caps additive accents', () => {
+  const p = fixture(), [a, b] = notes(p);
+  let saved = Dynamics.set(p, a.note.id, 'mf', 62);
+  saved = Dynamics.set(saved, b.note.id, 'ppp', 120);
+  b.note.accent = { velocityOffset: 50 };
+  const events = Plan.create(saved, 0).events;
+  assert.equal(events.find(e => e.sourceNoteId === a.note.id).velocity, 62);
+  assert.equal(events.find(e => e.sourceNoteId === b.note.id).velocity, 127);
+  assert.equal(events.find(e => e.pitches.includes(48)).velocity, 62);
+  assert.equal(Dynamics.velocityAt(saved, 4), 120);
+  assert.equal(Plan.create(saved, 4).events.find(e => e.sourceNoteId === b.note.id).velocity, 127);
+  assert.equal(Dynamics.velocityAt({ ...saved, dynamicChanges: [] }, 0), 88);
+  const editor = createChangesEditor(undefined, 120, undefined, 'treble', 'ppp', 'ppp', 120);
+  const draft = { ...editor, detail: 'dynamic', dynamicRow: 1 };
+  assert.equal(controlChangesEditor(draft, 'ArrowLeft', true, true).velocity, 119);
+  for (const velocity of [0, 128, 1.5]) assert.equal(Dynamics.set(saved, a.note.id, 'f', velocity), saved);
 });

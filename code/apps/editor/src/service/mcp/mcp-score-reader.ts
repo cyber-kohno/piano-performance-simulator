@@ -25,7 +25,7 @@ namespace McpScoreReader {
       restrictions: ['Existing model restrictions apply; unsupported settings are rejected.',
         'set_value does not fill rests: compensate durations in the same batch or replace the voice.',
         'Replacement creates new element IDs. Detach or retarget references explicitly.',
-        'Tempo and dynamic changes anchor to upper-staff voice 1; clef changes anchor to voice 1. Dynamics are notation/state only; preview velocity is unchanged.',
+        'Tempo and dynamic changes anchor to upper-staff voice 1; clef changes anchor to voice 1. Dynamics set absolute base velocity for preview playback.',
         'Ottava is the existing per-staff octave notation; it is independent of note IDs.',
         'No nested tuplets; written tuplet durations sum to actual base notes and event count equals actual.',
         'Grace notes require a single principal note longer than a 32nd; trills require a single-note tie chain.',
@@ -52,7 +52,7 @@ namespace McpScoreReader {
     const selected = all.slice(first - 1, first - 1 + count);
     const measureIds = new Set(selected.map(entry => entry.measure.id));
     const dynamicChanges = ScoreDynamics.changes(project).filter(change => measureIds.has(change.measureId))
-      .map(({ noteId, level }) => ({ noteId, level }));
+      .map(({ noteId, level, velocity }) => ({ noteId, level, velocity }));
     const noteIds = new Set<string>();
     const quarter = (time: ReturnType<typeof MusicalTime.create>) => MusicalTime.multiply(time, MusicalTime.create(1, 4));
     const measures = selected.map(({ measure: block, start }, index) => {
@@ -62,7 +62,7 @@ namespace McpScoreReader {
         const accidental = spelling.alter < 0 ? 'b'.repeat(-spelling.alter) : '#'.repeat(spelling.alter);
         return { ...item, name: `${spelling.step}${accidental}${spelling.octave}` };
       };
-      return { id: block.id, number: first + index, length: block.data.length, keySignature: key, tempoAtStart: ScoreTempo.at(project, start), dynamicAtStart: ScoreDynamics.at(project, start),
+      return { id: block.id, number: first + index, length: block.data.length, keySignature: key, tempoAtStart: ScoreTempo.at(project, start), dynamicAtStart: ScoreDynamics.at(project, start), baseVelocityAtStart: ScoreDynamics.velocityAt(project, start),
         clefAtStart: { upperStaff: ScoreClef.at(project, 'upperStaff', start), lowerStaff: ScoreClef.at(project, 'lowerStaff', start) },
         staves: (['upperStaff', 'lowerStaff'] as PianoStaffName[]).filter(staff => params.staff === undefined || staff === params.staff).map(staff => ({ staff,
           voices: block.data[staff].voices.flatMap((voice, index) => voiceIndex !== undefined && voiceIndex !== index ? [] : [{ id: voice.id, index,

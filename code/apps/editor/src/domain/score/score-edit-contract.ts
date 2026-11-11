@@ -32,7 +32,7 @@ const settings = obj({ meter: arr(int(1, 64), 2, 2), keyFifths: int(-7, 7), temp
 const fraction = obj({ numerator: int(0, 1048576), denominator: int(1, 1048576) });
 const position = obj({ measureId: str, offset: { ...fraction, description: 'Exact offset within the measure, measured in quarter notes. 1/2 is an eighth note. Only a stop event may use the score end.' } });
 const staccato = obj({ type: en('normal', 'staccatissimo'), lengthRatio: num(0.1, 0.9) });
-const accent = { ...obj({ velocityRate: num(1, 2) }), description: 'Accent on an attacked note only (no incoming tie). velocityRate is 1.0–2.0 in steps of 0.1; UI default is 1.5. Playback velocity is not yet affected.' };
+const accent = { ...obj({ velocityOffset: int(0, 50) }), description: 'Accent on an attacked note only (no incoming tie). velocityOffset is an integer 0–50 added to base velocity; UI default is 18. Playback caps velocity at 127.' };
 const fermata = { ...obj({ lengthRatio: num(1, 4) }), description: 'Fermata on a pitched note/chord with no outgoing tie. All written durations and tuplets are allowed; rests and grace notes are not targets. lengthRatio is 1.0–4.0 in steps of 0.1; UI default is 2.0. Across all voices/staves, overlapping fermata note spans must share the same absolute end position. Their merged span runs from the earliest start to that common end; the lowest voice index supplies the ratio, with upper staff breaking ties. Written value or absolute timing edits remove affected fermatas, including shifted successors. Pitch/chord edits retain them. An explicit assignment after timing edits in a batch can reapply a valid fermata. Preview playback stretches the shared range globally, including other voices, rests and pedal events; the playback cursor slows by the same factor.' };
 const arpeggio = obj({ type: en('normal', 'down'), spreadRatio: num(0.1, 1), timing: num(0, 1) });
 const gracePerformance = obj({ spreadRatio: num(0.1, 1), timing: num(0, 1) });
@@ -63,7 +63,7 @@ namespace ScoreEditContract {
     op('remove_ottava_event', { position, staff }),
     op('set_tempo_change', { noteId: str, bpm: nullable(int(10, 400)) }),
     op('set_clef_change', { noteId: str, clef: nullable(en('treble', 'bass')) }),
-    { ...op('set_dynamic_change', { noteId: str, level: nullable(en('ppp', 'pp', 'p', 'mp', 'mf', 'f', 'ff', 'fff')) }), description: 'Global dynamic state from this upper-staff voice-1 written note, including simultaneous attacks, until the next change. Tied notes, chords and tuplets are allowed; rests and grace notes are not anchors. null removes the change. Notation/state only; preview velocity is unchanged. Deleted/rested anchors are removed automatically.' },
+    { ...op('set_dynamic_change', { noteId: str, level: nullable(en('ppp', 'pp', 'p', 'mp', 'mf', 'f', 'ff', 'fff')), velocity: int(1, 127) }), description: 'Global dynamic state from this upper-staff voice-1 written note, including simultaneous attacks, until the next change. Tied notes, chords and tuplets are allowed; rests and grace notes are not anchors. null removes the change. velocity replaces absolute base preview velocity until the next change, independently of the notation level. Initial base velocity is 88. Deleted/rested anchors are removed automatically.' },
     op('set_initial_values', { settings }),
     op('set_measure_length', { measureId: str, length }),
     { ...op('set_key_change', { beforeMeasureId: str, afterBlockId: str, keyChangeId: str, keyFifths: nullable(int(-7, 7)) }, ['keyFifths']),

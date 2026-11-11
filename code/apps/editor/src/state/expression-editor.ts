@@ -40,8 +40,8 @@ export const expressionDefinitions: ExpressionDefinition[] = [{
   id: 'accent', label: 'Accent',
   available: note => !note.tieFrom,
   unavailableReason: () => 'Unavailable: this note is tied from a preceding note.',
-  create: () => ({ velocityRate: 1.5 }),
-  fields: [{ id: 'velocityRate', label: 'Velocity rate', kind: 'number', min: 1, max: 2, step: 0.1 }],
+  create: () => ({ velocityOffset: 18 }),
+  fields: [{ id: 'velocityOffset', label: 'Velocity offset', kind: 'number', min: 0, max: 50, step: 1 }],
 }, {
   id: 'fermata', label: 'Fermata',
   available: (note, _draft, project) => ScoreFermata.canApply(note) && (!project || !ScoreFermata.conflict(project, note.id)),
@@ -152,8 +152,8 @@ export function validateExpressionDraft(editor: ExpressionEditor, note: PianoNot
   const fermata=fermataFromDraft(editor);
   if (fermata && (!ScoreFermata.canApply(note) || !ScoreFermata.validate(fermata) || (project && ScoreFermata.conflict(project, note.id)))) return 'Invalid or unavailable fermata settings.';
   if (accent && note.tieFrom) return 'Accent is unavailable on a note tied from a preceding note.';
-  if (accent && (!Number.isFinite(accent.velocityRate) || accent.velocityRate < 1 || accent.velocityRate > 2 ||
-    Math.abs(accent.velocityRate * 10 - Math.round(accent.velocityRate * 10)) > 1e-8)) return 'Invalid accent settings.';
+  if (accent && (!Number.isFinite(accent.velocityOffset) || accent.velocityOffset < 0 || accent.velocityOffset > 50 ||
+    !Number.isInteger(accent.velocityOffset))) return 'Invalid accent settings.';
   if (arpeggio && (!ScoreArpeggio.canApply(note) || !ScoreArpeggio.validate(arpeggio))) return 'Invalid or unavailable arpeggio settings.';
   const values=editor.draft.staccato;
   if (!values) return note.tieTo && note.staccato ? 'Staccato cannot be changed while this note has an outgoing tie.' : undefined;
@@ -164,7 +164,7 @@ export function validateExpressionDraft(editor: ExpressionEditor, note: PianoNot
 }
 export function accentFromDraft(editor: ExpressionEditor): AccentSettings | undefined {
   const values=editor.draft.accent;
-  return values ? { velocityRate: values.velocityRate as number } : undefined;
+  return values ? { velocityOffset: values.velocityOffset as number } : undefined;
 }
 export function fermataFromDraft(editor: ExpressionEditor): FermataSettings | undefined {
   const values=editor.draft.fermata;

@@ -4,6 +4,46 @@ import ScoreVoice from '../domain/score/score-voice.ts';
 const staffNames = ['upperStaff', 'lowerStaff'] as const;
 export type HeaderMeasure = { id: string; number: number; start: number; width: number };
 namespace TimelineView {
+  /** Maximize fully visible pitch rows; ties choose the least movement from currentTop. */
+  export function bestPitchScrollTop(
+    pitches: readonly number[], currentTop: number, viewportHeight: number, maxScrollTop: number,
+    topMargin: number, rowHeight: number, padding = 12,
+  ): number {
+    if (!pitches.length || viewportHeight < rowHeight + 2 * padding) return currentTop;
+    const clamp = (value: number) => Math.max(0, Math.min(maxScrollTop, value));
+    const rows = new Map<number, number>();
+    for (const pitch of pitches) {
+      const top = topMargin + (108 - pitch) * rowHeight;
+      rows.set(top, (rows.get(top) ?? 0) + 1);
+    }
+    // Visibility changes only at these boundaries. Include currentTop so a
+    // currently optimal view never moves, including within a flat optimum.
+    const candidates = new Set([clamp(currentTop)]);
+    for (const top of rows.keys()) {
+      candidates.add(clamp(top - padding));
+      candidates.add(clamp(top + rowHeight + padding - viewportHeight));
+    }
+    let best = clamp(currentTop), maximum = -1;
+    for (const candidate of candidates) {
+      let count = 0;
+      for (const [top, weight] of rows) {
+        if (top >= candidate + padding && top + rowHeight <= candidate + viewportHeight - padding) count += weight;
+      }
+      if (count > maximum || (count === maximum && Math.abs(candidate - currentTop) < Math.abs(best - currentTop))) {
+        best = candidate;
+        maximum = count;
+      }
+    }
+    return best;
+  }
+
+  export function measurePitches(measure: MeasureBlock): number[] {
+    return staffNames.flatMap(staff => measure.data[staff].voices.flatMap(voice =>
+      ScoreVoice.flatten(voice, measure.data.length).flatMap(({ element }) => element.kind === 'note'
+        ? [...element.pitches, ...(element.beforeGraceNotes ?? []).flatMap(grace => grace.pitches)].map(pitch => pitch.midi)
+        : [])));
+  }
+
   export function visualGaps(outline: ScoreProject['outline']) {
     const measures = outline.filter(block => block.type === 'measure');
     const staffNotes = staffNames.flatMap(staff => Array.from({ length: Math.max(0, ...measures.map(measure => measure.data[staff].voices.length)) }, (_, index) => ScoreTimeline.notes(outline, staff, index)));

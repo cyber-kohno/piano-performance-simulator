@@ -229,7 +229,8 @@ namespace ScoreEditing {
           const target = note(op.noteId);
           if (!ScoreDynamics.anchors(candidate).some(anchor => anchor.noteId === target.item.id)) fail('Dynamics require an upper-staff voice-1 written note.');
           if (op.level !== null && !ScoreDynamics.isLevel(op.level)) fail('Invalid dynamic level.');
-          candidate = ScoreDynamics.set(candidate, target.item.id, op.level as DynamicLevel | null);
+          if (op.level !== null && !ScoreDynamics.isVelocity(op.velocity)) fail('Invalid dynamic velocity (1–127).');
+          candidate = ScoreDynamics.set(candidate, target.item.id, op.level as DynamicLevel | null, op.velocity as number);
           ids.push(target.item.id);
         } else if (type === 'set_tempo_change' || type === 'set_clef_change') {
           note(op.noteId);

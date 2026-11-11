@@ -28,7 +28,7 @@ export type NoteSettings = Pick<PianoNote, 'staccato' | 'accent' | 'fermata' | '
   trill?: TrillSettings;
   tempo?: { bpm: number | null };
   clef?: { value: Clef | null };
-  dynamic?: { level: DynamicLevel | null };
+  dynamic?: { level: DynamicLevel | null; velocity: number };
 };
 /** Application actions. Legacy pure editing algorithms remain in state until stage 2. */
 namespace NoteEditor {
@@ -177,7 +177,7 @@ namespace NoteEditor {
     next = ScoreTrill.set(next, id, settings.trill);
     if (settings.tempo) next = ScoreTempo.set(next, id, settings.tempo.bpm);
     if (settings.clef) next = ScoreClef.set(next, id, settings.clef.value);
-    if (settings.dynamic) next = ScoreDynamics.set(next, id, settings.dynamic.level);
+    if (settings.dynamic) next = ScoreDynamics.set(next, id, settings.dynamic.level, settings.dynamic.velocity);
     return EditTransaction.commit(project, next);
   }
 }

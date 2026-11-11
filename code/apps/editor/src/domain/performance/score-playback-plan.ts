@@ -1,3 +1,4 @@
+import ScoreDynamics from '../score/score-dynamics.ts';
 import ScoreTimeline, { type LocatedTimelineNote } from '../score/score-timeline.ts';
 import ScoreClock from './score-clock.ts';
 import StaccatoPerformance from './staccato-performance.ts';
@@ -19,6 +20,8 @@ export type PlaybackEvent = {
   /** Per-pitch lengths are used when a chord's pitches articulate differently. */
   pitchDurationsSeconds?: number[];
   graceNote?: boolean;
+  /** Absolute MIDI attack velocity. */
+  velocity?: number;
   sourceNoteId: string;
 };
 export type PlaybackPedalEvent = { atSeconds: number; action: 'start' | 'change' | 'stop' };
@@ -31,6 +34,7 @@ export type PlaybackPlan = {
   events: PlaybackEvent[];
 };
 type Prepared = {
+  dynamics: ReturnType<typeof ScoreDynamics.changes>;
   voices: { staff: PianoStaffName; voiceIndex: number; groups: LocatedTimelineNote[][] }[];
   slursByNote: Map<string, Set<string>>;
   clock: ReturnType<typeof ScoreClock.create>;
@@ -91,7 +95,7 @@ namespace ScorePlaybackPlan {
       }
     }
     const clock = ScoreClock.createTempo(project);
-    const prepared = { voices, slursByNote, clock,
+    const prepared = { dynamics: ScoreDynamics.changes(project), voices, slursByNote, clock,
       playbackClock: ScoreClock.withFermatas(clock, ScoreFermata.groups(project)),
       keys: ScoreKey.buildMeasureCache(project.outline),
       trills: new Map((project.trills ?? []).map(trill => [trill.startNoteId, trill])),
@@ -200,6 +204,16 @@ namespace ScorePlaybackPlan {
           const eventEnd = performedEndSeconds - startSeconds;
           noteEvents.push({ startSeconds: eventStart, durationSeconds: eventEnd - eventStart,
             pitches: first.note.pitches.map(pitch => pitch.midi), sourceNoteId: first.note.id });
+        }
+        for (const event of noteEvents) {
+          const position = clock.positionAt(startSeconds + event.startSeconds);
+          let baseVelocity = 88;
+          for (const change of prepared.dynamics) {
+            if (change.position > position + 1e-8) break;
+            baseVelocity = change.velocity;
+          }
+          event.velocity = Math.min(127, baseVelocity +
+            (event.graceNote ? 0 : first.note.accent?.velocityOffset ?? 0));
         }
         if (noteEvents.length === 0) continue;
         events.push(...noteEvents);

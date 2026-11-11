@@ -36,7 +36,7 @@ namespace ScoreIntegrity {
             for (const pitch of item.pitches) if (pitch.substitutionFingering && pitch.substitutionFingering === pitch.fingering) fail(`Substitution fingering must differ: ${item.id}.`);
             if (item.staccato && item.arpeggio) fail(`Staccato and arpeggio are mutually exclusive: ${item.id}.`);
             if (item.fermata && (!ScoreFermata.validate(item.fermata) || !ScoreFermata.canApply(item))) fail(`Fermata requires a valid ratio and the last tied segment: ${item.id}.`);
-            if (item.accent && !ScoreArpeggio.isTenthInRange(item.accent.velocityRate, 1, 2)) fail(`Invalid accent rate: ${item.id}.`);
+            if (item.accent && (!Number.isInteger(item.accent.velocityOffset) || item.accent.velocityOffset < 0 || item.accent.velocityOffset > 50)) fail(`Invalid accent offset: ${item.id}.`);
             if (item.staccato && (!ScoreArpeggio.isTenthInRange(item.staccato.lengthRatio, 0.1, 0.9) || item.tieTo)) fail(`Staccato requires a valid ratio and the last tied segment: ${item.id}.`);
             if (item.arpeggio && (!ScoreArpeggio.validate(item.arpeggio) || !ScoreArpeggio.canApply(item))) fail(`Invalid arpeggio target or settings: ${item.id}.`);
             if (item.beforeGraceNotes?.length && (item.pitches.length !== 1 || item.value.type === '32nd')) fail(`Grace notes require a single principal note longer than a 32nd: ${item.id}.`);

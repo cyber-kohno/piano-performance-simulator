@@ -50,7 +50,13 @@
     <div class="expression-list" bind:this={content}>
     {#if tab === 'changes'}
       <div role="listbox" aria-label={changesEditor.detail ? `${changesEditor.detail} settings` : 'Changes'}>
-        {#if changesEditor.detail}
+        {#if changesEditor.detail === 'dynamic'}
+          {#each ['Level', 'Base velocity'] as label, index}
+            <div role="option" aria-selected={changesEditor.dynamicRow === index} class="expression-row" class:active={changesEditor.dynamicRow === index}>
+              <span>{label}</span><span class="expression-value">{index === 0 ? changesEditor.dynamic : changesEditor.velocity}</span>
+            </div>
+          {/each}
+        {:else if changesEditor.detail}
           <div role="option" aria-selected="true" class="expression-row active">
             <span>{changesEditor.detail === 'tempo' ? 'BPM' : changesEditor.detail === 'clef' ? 'Clef' : 'Level'}</span>
             <span class="expression-value">{changesEditor.detail === 'tempo' ? changesEditor.tempo.bpm : changesEditor.detail === 'clef' ? changesEditor.clef === 'treble' ? 'Treble' : 'Bass' : changesEditor.dynamic}</span>
@@ -85,7 +91,7 @@
         <p>Applies to every voice on this staff from this note. Pitches are unchanged.</p>
         {#if target.voice !== 1}<p class="unavailable">Requires Voice 1 on this staff.</p>{/if}
       {:else}
-        <p>Global level until the next dynamic change. Current: {changesEditor.currentDynamic}. Playback is not yet affected.</p>
+        <p>Sets absolute base velocity until the next change. Level controls notation. ↑↓ Select · ←→ Edit</p>
         {#if target.voice !== 1 || target.staff !== 'upperStaff' || target.graceNote}<p class="unavailable">Requires a written note in Upper · Voice 1.</p>{/if}
       {/if}
       <p>{changesEditor.detail ? '←→ Edit · Backspace Back' : '↑↓ Select · Enter Settings · Delete Remove'}</p>

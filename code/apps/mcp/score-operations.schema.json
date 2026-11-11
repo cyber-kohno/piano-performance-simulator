@@ -1520,17 +1520,17 @@
               {
                 "type": "object",
                 "properties": {
-                  "velocityRate": {
-                    "type": "number",
-                    "minimum": 1,
-                    "maximum": 2
+                  "velocityOffset": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 50
                   }
                 },
                 "required": [
-                  "velocityRate"
+                  "velocityOffset"
                 ],
                 "additionalProperties": false,
-                "description": "Accent on an attacked note only (no incoming tie). velocityRate is 1.0–2.0 in steps of 0.1; UI default is 1.5. Playback velocity is not yet affected."
+                "description": "Accent on an attacked note only (no incoming tie). velocityOffset is an integer 0–50 added to base velocity; UI default is 18. Playback caps velocity at 127."
               },
               {
                 "type": "null"
@@ -2149,15 +2149,21 @@
                 "type": "null"
               }
             ]
+          },
+          "velocity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 127
           }
         },
         "required": [
           "type",
           "noteId",
-          "level"
+          "level",
+          "velocity"
         ],
         "additionalProperties": false,
-        "description": "Global dynamic state from this upper-staff voice-1 written note, including simultaneous attacks, until the next change. Tied notes, chords and tuplets are allowed; rests and grace notes are not anchors. null removes the change. Notation/state only; preview velocity is unchanged. Deleted/rested anchors are removed automatically."
+        "description": "Global dynamic state from this upper-staff voice-1 written note, including simultaneous attacks, until the next change. Tied notes, chords and tuplets are allowed; rests and grace notes are not anchors. null removes the change. velocity replaces absolute base preview velocity until the next change, independently of the notation level. Initial base velocity is 88. Deleted/rested anchors are removed automatically."
       },
       {
         "type": "object",

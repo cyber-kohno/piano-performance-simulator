@@ -29,7 +29,7 @@ noteId: target.note.id, staff: cursor.staff, voice: target.voiceIndex + 1, trill
       expression: createExpressionEditor(target.note, ScoreTrill.forNote(project, target.note.id)?.settings),
       changes: createChangesEditor(project.tempoChanges?.find(change => change.noteId === target.note.id)?.bpm, ScoreTempo.at(project, position),
         project.clefChanges?.find(change => change.noteId === target.note.id)?.clef, ScoreClef.at(project, cursor.staff, position),
-        project.dynamicChanges?.find(change => change.noteId === target.note.id)?.level, ScoreDynamics.at(project, position))
+        project.dynamicChanges?.find(change => change.noteId === target.note.id)?.level, ScoreDynamics.at(project, position), project.dynamicChanges?.find(change => change.noteId === target.note.id)?.velocity)
 };
   }
   function settings(editor: NoteSettingsState) {
@@ -37,7 +37,7 @@ noteId: target.note.id, staff: cursor.staff, voice: target.voiceIndex + 1, trill
       staccato: staccatoFromDraft(editor.expression), accent: accentFromDraft(editor.expression), fermata: fermataFromDraft(editor.expression), arpeggio: arpeggioFromDraft(editor.expression),
       gracePerformance: gracePerformanceFromDraft(editor.expression), trill: trillFromDraft(editor.expression),
       ...(editor.target.staff === 'upperStaff' && editor.target.voice === 1 ? { tempo: { bpm: editor.changes.tempo.bpm } } : {}),
-      ...(!editor.target.graceNote && editor.target.staff === 'upperStaff' && editor.target.voice === 1 ? { dynamic: { level: editor.changes.dynamic } } : {}),
+      ...(!editor.target.graceNote && editor.target.staff === 'upperStaff' && editor.target.voice === 1 ? { dynamic: { level: editor.changes.dynamic, velocity: editor.changes.velocity } } : {}),
       ...(editor.target.voice === 1 ? { clef: { value: editor.changes.clef } } : {})    
 };
   }
@@ -54,7 +54,7 @@ noteId: target.note.id, staff: cursor.staff, voice: target.voiceIndex + 1, trill
       if (!editor.target.graceNote && editor.target.staff === 'upperStaff' && editor.target.voice === 1 &&
         editor.changes.dynamic !== null && !ScoreDynamics.anchors(project).some(anchor => anchor.noteId === selected.note.id))
         return { editor: { ...editor, expression: { ...editor.expression, error: 'Dynamics require an upper-staff voice-1 written note.' } } };
-      if (editor.changes.dynamic !== null && !ScoreDynamics.isLevel(editor.changes.dynamic))
+      if (editor.changes.dynamic !== null && (!ScoreDynamics.isLevel(editor.changes.dynamic) || !ScoreDynamics.isVelocity(editor.changes.velocity)))
         return { editor: { ...editor, expression: { ...editor.expression, error: 'Invalid dynamic level.' } } };
       return error ? { editor: { ...editor, expression: { ...editor.expression, error } } } : { editor: null, commit: settings(editor) };
     }

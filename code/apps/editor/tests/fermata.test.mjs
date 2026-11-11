@@ -112,15 +112,15 @@ test('save/reload, passage copy/paste and independent duplication preserve ferma
 test('MCP sets/updates/reads/removes fermata while retaining other expressions, and exports its contract', () => {
   const state = fixture(), id = state.cursor.focusedNoteId;
   let project = edit(state.project, [{ type: 'set_note_expression', noteId: id,
-    fermata: { lengthRatio: 2 }, accent: { velocityRate: 1.5 } }]);
+    fermata: { lengthRatio: 2 }, accent: { velocityOffset: 18 } }]);
   project = edit(project, [{ type: 'set_note_expression', noteId: id, fermata: { lengthRatio: 4 } }]);
   const elements = Reader.range(project, { firstMeasure: 1, measureCount: 1 }).measures[0].staves[0].voices[0].elements;
   assert.equal(elements.find(element => element.id === id).fermata.lengthRatio, 4);
-  assert.equal(elements.find(element => element.id === id).accent.velocityRate, 1.5);
+  assert.equal(elements.find(element => element.id === id).accent.velocityOffset, 18);
   assert.ok(Reader.capabilities('set_note_expression').operationSchema.properties.fermata);
   project = edit(project, [{ type: 'set_note_expression', noteId: id, fermata: null }]);
   assert.equal(note({ ...state, project }).fermata, undefined);
-  assert.equal(note({ ...state, project }).accent.velocityRate, 1.5);
+  assert.equal(note({ ...state, project }).accent.velocityOffset, 18);
 });
 
 test('invalid ratios and unsupported MCP targets are rejected atomically', () => {

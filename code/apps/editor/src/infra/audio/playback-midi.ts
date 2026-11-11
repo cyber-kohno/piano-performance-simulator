@@ -25,7 +25,8 @@ export function createPlaybackMidi(sequence: PlaybackSequence, velocity = 88): A
   }
   const attacks = sequence.events.flatMap(event => event.pitches.map((pitch, index) => {
     const start = tickAt(event.startSeconds);
-    return { pitch, start, end: Math.max(start + 1, tickAt(event.startSeconds + (event.pitchDurationsSeconds?.[index] ?? event.durationSeconds))) };
+    const noteVelocity = Math.min(127, Math.max(0, Math.round(event.velocity ?? velocity)));
+    return { pitch, start, end: Math.max(start + 1, tickAt(event.startSeconds + (event.pitchDurationsSeconds?.[index] ?? event.durationSeconds))), velocity: noteVelocity };
   })).sort((a, b) => a.start - b.start || a.end - b.end);
   // SpessaSynth releases repeated pitches FIFO. Separate overlapping instances
   // onto different MIDI channels so out-of-order releases also remain correct.
@@ -38,7 +39,7 @@ export function createPlaybackMidi(sequence: PlaybackSequence, velocity = 88): A
     until[slot] = attack.end;
     releases.set(attack.pitch, until);
     const channel = CHANNELS[slot];
-    add(attack.start, 0, [0x90 | channel, attack.pitch, velocity]);
+    add(attack.start, 0, [0x90 | channel, attack.pitch, attack.velocity]);
     add(attack.end, -1, [0x80 | channel, attack.pitch, 0]);
     endTick = Math.max(endTick, attack.end);
   }

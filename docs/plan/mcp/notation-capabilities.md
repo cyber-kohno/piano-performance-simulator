@@ -21,8 +21,8 @@
 | トリル | trills、補助音・開始音・打鍵回数設定、表示・再生処理あり | set_trillで設定・変更・解除 |
 | スラー | slurs、表示・再生への適用あり | set_slur／remove_slur |
 | スタッカート／スタッカティッシモ | staccato、表示・発音長への適用あり | set_note_expression |
-| アクセント | accent、楽譜表示あり。velocityRateは1.0〜2.0の0.1刻み、UI初期値1.5。再生反映は未対応 | set_note_expression。前からタイで連結された音符への設定・変更は拒否、nullで解除可能 |
-| 強弱記号 | dynamicChanges。ppp／pp／p／mp／mf／f／ff／fffの8段階。変更位置以降、次の変更まで全声部・両段に共通適用する状態として保持。既定状態はmf。楽譜表示あり、演奏ベロシティへの反映は未対応 | set_dynamic_change。上段・声部1の記譜音符のみ。タイ途中・和音・付点・連符も可。休符・装飾音符は対象外。nullで解除 |
+| アクセント | accent、楽譜表示・プレビュー再生に反映。velocityOffsetは0〜50の整数、UI初期値18。基準ベロシティに加算し、MIDI上限127でクリップ | set_note_expression。前からタイで連結された音符への設定・変更は拒否、nullで解除可能 |
+| 強弱記号 | dynamicChanges。ppp／pp／p／mp／mf／f／ff／fffの8段階。変更位置以降、次の変更まで全声部・両段に共通適用する状態として保持。既定状態はmf。各変更位置にvelocity（1〜127の整数）を保持し、全声部の基準ベロシティを絶対値で更新 | set_dynamic_change。上段・声部1の記譜音符のみ。タイ途中・和音・付点・連符も可。休符・装飾音符は対象外。nullで解除 |
 | フェルマータ | fermata、楽譜表示あり。lengthRatioは1.0〜4.0の0.1刻み、UI初期値2.0。重複は共通終端のみ許可し、最早開始〜共通終端の範囲を共有。倍率は声部昇順、同じ声部なら上段を優先。プレビュー再生では全声部・両段と再生線の時間を共通伸長 | set_note_expression。タイは終端のみ。休符・装飾音符は対象外。音価・位置変更で削除、ピッチ変更は保持。get_score_rangeのfermataGroupsで有効設定を取得 |
 | アルペジオ | arpeggio、表示・分散発音処理あり | set_note_expression |
 | サステインペダル | start/change/stop、表示・再生処理あり | set_pedal_event／remove_pedal_event。音符から独立した位置 |

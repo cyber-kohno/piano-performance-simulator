@@ -26,8 +26,8 @@ export type StaccatoSettings = {
   lengthRatio: number;
 };
 export type AccentSettings = {
-  /** Multiplier applied to the note's MIDI velocity when playback support is added. */
-  velocityRate: number;
+  /** Added to the current base MIDI velocity, capped at 127. */
+  velocityOffset: number;
 };
 export type FermataSettings = {
   /** Hold multiplier; overlapping notes share the union span and the highest-priority member supplies this value. */
@@ -133,7 +133,7 @@ export type ScoreProject = {
   /** Global changes anchored to upper-staff voice-1 written notes. */
   tempoChanges?: { noteId: string; bpm: number }[];
   /** Global dynamic state changes anchored to upper-staff voice-1 written notes. */
-  dynamicChanges?: { noteId: string; level: DynamicLevel }[];
+  dynamicChanges?: { noteId: string; level: DynamicLevel; velocity: number }[];
   outline: [InitialValuesBlock, SectionBlock, ...OutlineBlock[]];
   trills?: TrillSpan[];
 };

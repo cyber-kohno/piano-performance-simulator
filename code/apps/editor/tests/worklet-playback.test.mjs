@@ -150,3 +150,10 @@ test('sequence end is delivered once, and failed loads can be followed by a fres
   player.ended(); player.ended();
   assert.equal(ended, 1);
 });
+
+
+test('MIDI preserves absolute event velocities and clips the MIDI upper limit', () => {
+  const events = messages(parse(plan([ { ...note(0, 0.2), velocity: 62 },
+    { ...note(0.3, 0.2), velocity: 127 }, { ...note(0.6, 0.2), velocity: 160 } ])));
+  assert.deepEqual(events.filter(e => (e.statusByte & 0xf0) === 0x90).map(e => e.data[1]), [62, 62, 127, 127, 127, 127]);
+});
