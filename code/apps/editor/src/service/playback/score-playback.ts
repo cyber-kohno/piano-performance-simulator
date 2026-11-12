@@ -1,3 +1,4 @@
+import { createPlaybackHighlight } from './playback-highlight.ts';
 import type { PlaybackInstrumentPort } from './playback-instrument.ts';
 import ScorePlaybackPlan from '../../domain/performance/score-playback-plan.ts';
 import type { ScoreProject } from '../../domain/score/types.ts';
@@ -6,6 +7,7 @@ namespace ScorePlayback {
   export type Value = {
     readonly playing: boolean;
     readonly position: number | null;
+    readonly soundingNoteIds: readonly string[];
     invalidate(project: ScoreProject): void;
     prepare(project: ScoreProject): void;
     start(project: ScoreProject, startPosition: number, onPosition: (position: number) => void, onStop: () => void): boolean;
@@ -22,9 +24,11 @@ namespace ScorePlayback {
     let preparedProject: ScoreProject | undefined;
     let prepared: ReturnType<typeof ScorePlaybackPlan.prepare> | undefined;
     let cachedPlan: ReturnType<typeof ScorePlaybackPlan.create> | undefined;
+    let soundingNow: (() => readonly string[]) | undefined;
     let positionNow: (() => number) | undefined;
     const value: Value = {
       get playing() { return playing; },
+      get soundingNoteIds() { return playing ? soundingNow?.() ?? [] : []; },
       get position() { return playing ? positionNow?.() ?? null : null; },
       invalidate(project) {
         if (preparedProject === project) return;
@@ -60,6 +64,8 @@ namespace ScorePlayback {
               value.stop();
             },
           });
+          const highlight = createPlaybackHighlight(nextPlan.events);
+          soundingNow = () => run.ready === false ? [] : highlight(run.currentTime);
           positionNow = () => Math.max(nextPlan.startPosition, Math.min(nextPlan.endPosition,
             snapshot.clock.positionAt(startSeconds + run.currentTime)));
         } catch (error) {
@@ -84,6 +90,7 @@ namespace ScorePlayback {
         progressTimer = undefined;
         instrument.stop();
         positionNow = undefined;
+        soundingNow = undefined;
         onPosition = undefined;
         const stopped = onStop;
         onStop = undefined;

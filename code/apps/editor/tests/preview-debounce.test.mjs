@@ -6,6 +6,11 @@ import ts from 'typescript';
 
 test('rapid preview updates cancel XML preparation as well as rendering', async () => {
   const savedWindow = globalThis.window;
+  const frames = new Map(), painted = [];
+  const oldRequest = globalThis.requestAnimationFrame, oldCancel = globalThis.cancelAnimationFrame;
+  let frameId = 0, playingIds = [];
+  globalThis.requestAnimationFrame = fn => { frames.set(++frameId, fn); return frameId; };
+  globalThis.cancelAnimationFrame = id => frames.delete(id);
   const timers = new Map();
   let nextId = 0, prepared = 0, rendered = 0, finalOutline;
   globalThis.window = {
@@ -14,7 +19,7 @@ test('rapid preview updates cancel XML preparation as well as rendering', async 
   };
   globalThis.__previewDebounce = {
     xml: { create(outline) { prepared++; finalOutline = outline; return { xml: 'test' }; } },
-    renderer: { async render() { rendered++; } },
+    renderer: { async render() { rendered++; return (ids, color) => painted.push({ ids: [...ids], color }); } },
   };
   let dispose;
   try {
@@ -32,7 +37,7 @@ test('rapid preview updates cancel XML preparation as well as rendering', async 
         const PreviewMusicXml = globalThis.__previewDebounce.xml;
         const ScorePreviewRenderer = globalThis.__previewDebounce.renderer;
         ${body}
-        api = { attach(node) { host = node; }, update(next) { outline = next; } };
+        api = { attach(node) { host = node; }, update(next) { outline = next; }, start(read) { getPlayingNoteIds = read; playbackActive = true; }, stop() { playbackActive = false; } };
       });
       return { ...api, dispose };
     }`;
@@ -58,6 +63,17 @@ test('rapid preview updates cancel XML preparation as well as rendering', async 
     assert.equal(prepared, 1);
     assert.equal(rendered, 1);
     assert.equal(finalOutline[0].id, 'revision-4');
+    await settle();
+    view.start(() => playingIds); await settle();
+    assert.equal(frames.size, 1);
+    playingIds = ['sounding'];
+    const frame = [...frames.values()][0]; frames.clear(); frame();
+    assert.deepEqual(painted.at(-1), { ids: ['sounding'], color: '#e65100' });
+    assert.equal(prepared, 1); assert.equal(rendered, 1); assert.equal(timers.size, 0);
+    view.stop(); await settle();
+    assert.equal(frames.size, 0); assert.deepEqual(painted.at(-1).ids, []);
+    view.start(() => playingIds); await settle();
+    assert.equal(frames.size, 1);
     view.update([{ id: 'cancel-on-destroy' }]);
     await settle();
     dispose(); dispose = undefined;
@@ -66,6 +82,8 @@ test('rapid preview updates cancel XML preparation as well as rendering', async 
   } finally {
     dispose?.();
     globalThis.window = savedWindow;
+    if (oldRequest === undefined) delete globalThis.requestAnimationFrame; else globalThis.requestAnimationFrame = oldRequest;
+    if (oldCancel === undefined) delete globalThis.cancelAnimationFrame; else globalThis.cancelAnimationFrame = oldCancel;
     delete globalThis.__previewDebounce;
   }
 });

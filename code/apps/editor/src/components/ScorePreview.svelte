@@ -3,11 +3,20 @@
   import ScorePreviewRenderer from '../infra/notation/score-preview-renderer.ts';
   import type { ScoreProject } from '../domain/score/types.ts';
 
-  let { outline, activeIndex, trills, tempoChanges, clefChanges, slurs, dynamicChanges, selectedNoteIds = [] }: { outline: ScoreProject['outline']; activeIndex: number; trills?: ScoreProject['trills']; tempoChanges?: ScoreProject['tempoChanges']; clefChanges?: ScoreProject['clefChanges']; dynamicChanges?: ScoreProject['dynamicChanges']; slurs?: ScoreProject['slurs']; selectedNoteIds?: string[] } = $props();
+  let { playbackActive = false, getPlayingNoteIds = () => [], outline, activeIndex, trills, tempoChanges, clefChanges, slurs, dynamicChanges, selectedNoteIds = [] }: { playbackActive?: boolean; getPlayingNoteIds?: () => readonly string[]; outline: ScoreProject['outline']; activeIndex: number; trills?: ScoreProject['trills']; tempoChanges?: ScoreProject['tempoChanges']; clefChanges?: ScoreProject['clefChanges']; dynamicChanges?: ScoreProject['dynamicChanges']; slurs?: ScoreProject['slurs']; selectedNoteIds?: string[] } = $props();
   let host = $state<HTMLDivElement>();
   let message = $state<string | null>(null);
-  let paintSelection = $state<((ids: readonly string[]) => void) | null>(null);
-  $effect(() => { paintSelection?.(selectedNoteIds); });
+  let paintSelection = $state<((ids: readonly string[], color?: string) => void) | null>(null);
+  $effect(() => {
+    const painter = paintSelection;
+    if (!playbackActive) { painter?.(selectedNoteIds); return; }
+    if (!painter) return;
+    const read = getPlayingNoteIds;
+    let frame = 0;
+    const update = () => { painter(read(), '#e65100'); frame = requestAnimationFrame(update); };
+    update();
+    return () => cancelAnimationFrame(frame);
+  });
   $effect(() => {
     // Capture dependencies now, but defer preparation as well as rendering.
     // Held-key edits cancel the entire pending preview calculation.

@@ -162,3 +162,17 @@ test('edits only invalidate playback; the next start prepares the latest revisio
   start(original);
   assert.equal(builds, 3);
 });
+
+
+test('highlight waits for the audio engine, follows releases and clears on stop', t => {
+ const oldWindow = globalThis.window; globalThis.window = { setInterval() { return 1; }, clearInterval() {} };
+ let time = 0, ready = false;
+ const player = Playback.create({ startSequence() { return { get currentTime() { return time; }, get ready() { return ready; } }; }, stop() {} });
+ t.after(() => { player.dispose(); globalThis.window = oldWindow; });
+ const p = fixture(), ids = Timeline.notes(p.outline).map(e => e.note.id);
+ player.start(p, 0, () => {}, () => {});
+ assert.deepEqual(player.soundingNoteIds, []); ready = true;
+ assert.deepEqual(player.soundingNoteIds, [ids[0]]);
+ time = .5; assert.deepEqual(player.soundingNoteIds, [ids[1]]);
+ player.stop(); assert.deepEqual(player.soundingNoteIds, []);
+});

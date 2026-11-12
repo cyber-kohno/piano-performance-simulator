@@ -35,7 +35,7 @@ export function createWorkletSequencePlayer(engine: SequenceEngine) {
       stop();
       callbacks.failed(error);
     });
-    return { get currentTime() {
+    return { get ready() { return run.ready && run.generation === generation; }, get currentTime() {
       return run.ready && run.generation === generation
         ? Math.max(0, Math.min(sequence.durationSeconds, engine.currentTime)) : 0;
     } };

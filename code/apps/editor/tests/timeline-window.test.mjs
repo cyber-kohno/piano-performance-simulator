@@ -62,7 +62,7 @@ test('layout edits and resizing update the focused window without stale measure 
   assert.ok(wide.indices.every(i => measures[i]));
 });
 
-async function componentFixture() {
+async function componentFixture(scrollEffects = false) {
   // Exercise the actual component's reactive script and scroll handler with
   // Svelte's compiler/runtime. Only DOM mounting/effects are omitted.
   const componentUrl = new URL('../src/components/TimelinePanel.svelte', import.meta.url);
@@ -79,16 +79,20 @@ async function componentFixture() {
     const resolved = path.startsWith('.') ? new URL(/\.[a-z]+$/i.test(path) ? path : `${path}.ts`, componentUrl).href : path;
     imports.push(statement.getText(ast).replace(statement.moduleSpecifier.getText(ast), JSON.stringify(resolved)));
   }
-  const harness = `${imports.join('\n')}
+  const harness = `import { untrack } from ${JSON.stringify(import.meta.resolve('svelte/internal/client'))};
+    ${imports.join('\n')}
     export function createFixture(options) {
       const onDestroy = () => {}, ignoreEffect = () => {};
-      ${body.join('\n').replace(/\$effect\(/g, 'ignoreEffect(')}
+      ${body.map(statement => scrollEffects && (statement.includes('const blockId = verticalFocusMeasureId') || statement.includes('const pitchIndex = 108 - timelineCursor.pitch')) ? statement : statement.replace(/\$effect\(/g, 'ignoreEffect(')).join('\n')}
       return {
-        attach(roll) { pianoRollViewport = roll; syncTimelineScroll(); },
+        attach(roll, pitch) { pianoRollViewport = roll; pitchScrollViewport = pitch; syncTimelineScroll(); },
         scroll: syncTimelineScroll,
         focus(position) { timelineCursor = { ...timelineCursor, positionSixteenths: position }; },
         outlineFocus(blockId) { playbackPosition = null; mode = 'outline'; cursor = { blockId }; },
         play(position) { playbackPosition = position; },
+        start(position) { playbackPosition = position; playbackActive = true; },
+        stop() { playbackActive = false; playbackPosition = null; },
+        setPitch(pitch) { timelineCursor = { ...timelineCursor, pitch }; },
         get window() { return renderWindow; },
         get data() { return [visibleMeasures, visibleTiePaths, visibleSlurPaths, visiblePedalEvents,
           visiblePedalSpans, visibleOttavaEvents, visibleOttavaSpans]; }
@@ -150,4 +154,46 @@ test('horizontal animation reuses display data; focus, playback and vertical scr
   assert.equal(view.window.indices.at(-1), 99);
   view.outlineFocus(project.outline[0].id);
   assert.equal(view.window.indices[0], 0);
+});
+
+
+test('playback fits on start and measure changes in both modes without following the pitch cursor', async t => {
+  const { effect_root, flush: flush_sync } = await import('svelte/internal/client');
+  const createFixture = await componentFixture(true);
+  const timers = new Map(); let timerId = 0;
+  const previousWindow = globalThis.window;
+  globalThis.window = { setTimeout(fn) { timers.set(++timerId, fn); return timerId; }, clearTimeout(id) { timers.delete(id); } };
+  t.after(() => { if (previousWindow === undefined) delete globalThis.window; else globalThis.window = previousWindow; });
+  const finishScroll = () => { const callbacks = [...timers.values()]; timers.clear(); callbacks.forEach(fn => fn()); flush_sync(); };
+  class Viewport { scrollLeft = 0; scrollTop = 0; clientWidth = 960; clientHeight = 120; scrollHeight = 2220; }
+  for (const mode of ['outline', 'timeline']) {
+    const project = projectWithBars(regularBars(3));
+    const note = (id, midi) => ({ id, kind: 'note', value: { type: 'whole', dots: 0 }, pitches: [{ midi }] });
+    project.outline.find(b => b.id === 'm0').data.upperStaff.voices[0].elements = [note('high', 108)];
+    project.outline.find(b => b.id === 'm1').data.lowerStaff.voices[0].elements = [note('low', 36)];
+    let view;
+    const dispose = effect_root(() => { view = createFixture({ outline: project.outline, cursor: { blockId: 'm0' },
+      timelineCursor: createTimelineCursor(), mode, pedalCursor: {}, ottavaCursor: {} }); });
+    try {
+      const roll = new Viewport(), pitch = new Viewport();
+      view.attach(roll, pitch); flush_sync(); finishScroll();
+      roll.scrollTop = pitch.scrollTop = 1000; view.scroll();
+      view.start(0); flush_sync(); finishScroll();
+      assert.equal(roll.scrollTop, 48, mode + ' fits immediately even when the starting measure did not change');
+      assert.equal(pitch.scrollTop, roll.scrollTop);
+      roll.scrollTop = pitch.scrollTop = 800; view.scroll();
+      view.play(1); view.setPitch(21); flush_sync();
+      assert.equal(timers.size, 0, 'same-measure ticks and cursor pitch changes do not refit');
+      assert.equal(roll.scrollTop, 800);
+      view.play(16); flush_sync(); finishScroll();
+      assert.ok(roll.scrollTop > 1600, 'next active measure shows the low note');
+      assert.equal(pitch.scrollTop, roll.scrollTop);
+      const previous = roll.scrollTop;
+      view.play(32); flush_sync(); finishScroll();
+      assert.equal(roll.scrollTop, previous, 'rest-only measure preserves height');
+      view.stop(); flush_sync(); finishScroll();
+      if (mode === 'outline') assert.equal(roll.scrollTop, 48, 'stopping restores the outline-focused measure');
+      else assert.ok(roll.scrollTop > 1900, 'stopping restores pitch-cursor following');
+    } finally { dispose(); timers.clear(); }
+  }
 });

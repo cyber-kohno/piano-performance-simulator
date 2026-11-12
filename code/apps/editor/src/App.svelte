@@ -777,6 +777,7 @@
       {pedalCursor}
       {ottavaMode}
       {ottavaCursor}
+      getPlayingNoteIds={() => playback?.soundingNoteIds ?? []}
       {playbackPosition}
       playbackActive={playbackPosition !== null}
       expressionModalOpen={noteSettings !== null}

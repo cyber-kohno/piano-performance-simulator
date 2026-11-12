@@ -37,10 +37,10 @@ test('selection updates colors without rendering and restores existing styles an
     path.style.setProperty('fill', '#123456', 'important');
     const paint = createPreviewSelectionPainter(new Map([['a', new Set([head, stem])], ['b', new Set([other])]]));
     paint(['a']);
-    assert.equal(path.style.getPropertyValue('fill'), '#2b8c46');
+    assert.equal(path.style.getPropertyValue('fill'), '#1565c0');
     assert.equal(path.style.getPropertyValue('stroke'), '');
     assert.equal(stem.style.getPropertyValue('fill'), '');
-    assert.equal(stem.style.getPropertyValue('stroke'), '#2b8c46');
+    assert.equal(stem.style.getPropertyValue('stroke'), '#1565c0');
     paint(['a', 'b', 'outside-preview']);
     assert.equal(path.style.getPropertyValue('fill'), '#c62828');
     assert.equal(other.style.getPropertyValue('fill'), '#c62828');
@@ -63,4 +63,26 @@ test('preview targets are per note column rather than pitch, and positions are l
   const preview = createScorePreview(lower.project.outline, 0);
   assert.equal(preview.noteTargets.length, 2);
   assert.deepEqual(preview.noteTargets[1], { noteId: lower.cursor.focusedNoteId, measureOffset: 1, staffIndex: 1, voiceNumber: 4, position: 2 });
+});
+
+
+test('playback painting updates only changed elements and restores selection styles', () => {
+ const old = globalThis.getComputedStyle; globalThis.getComputedStyle = el => el.computed;
+ try {
+  const a = element(), b = element(); let writes = 0;
+  for (const el of [a,b]) for (const method of ['setProperty','removeProperty']) { const original = el.style[method]; el.style[method] = (...args) => { writes++; return original(...args); }; }
+  const paint = createPreviewSelectionPainter(new Map([['a',new Set([a])],['b',new Set([b])]]));
+  paint(['a'], '#e65100'); const first = writes;
+  paint(['a'], '#e65100'); assert.equal(writes, first);
+  paint(['a','b'], '#e65100'); assert.equal(a.style.getPropertyValue('fill'), '#e65100');
+  paint([]); assert.equal(a.style.getPropertyValue('fill'), ''); assert.equal(b.style.getPropertyValue('fill'), '');
+ } finally { globalThis.getComputedStyle = old; }
+});
+
+test('grace targets distinguish each grace entry from the principal note', () => {
+ const a = element(), b = element(), main = element();
+ const renderer = { GraphicSheet: { MeasureList: [[{ staffEntries: [{ graphicalVoiceEntries: [{ notes: [note(0,1,[a],true),note(0,1,[b],true),note(0,1,[main])] }] }] }]] } };
+ const base = { measureOffset: 0, staffIndex: 0, voiceNumber: 1, position: 0 };
+ const mapped = mapPreviewNotes(renderer, [{ ...base, noteId: 'g0', graceIndex: 0 },{ ...base, noteId: 'g1', graceIndex: 1 },{ ...base, noteId: 'main' }]);
+ assert.deepEqual([...mapped.get('g0')], [a]); assert.deepEqual([...mapped.get('g1')], [b]); assert.deepEqual([...mapped.get('main')], [main]);
 });

@@ -23,6 +23,8 @@ export type PlaybackEvent = {
   /** Absolute MIDI attack velocity. */
   velocity?: number;
   sourceNoteId: string;
+  notationNoteIds?: string[];
+  notationRanges?: { noteId: string; startSeconds: number; endSeconds?: number }[];
 };
 export type PlaybackPedalEvent = { atSeconds: number; action: 'start' | 'change' | 'stop' };
 export type PlaybackPlan = {
@@ -158,7 +160,7 @@ namespace ScorePlaybackPlan {
               const duration = nextOnset - effectiveOnset;
               if (duration <= 0) return;
               graceEvents.push({ startSeconds: effectiveOnset - startSeconds, durationSeconds: duration,
-                pitches: [attack.midi], sourceNoteId: `${first.note.id}-grace-${index}`, graceNote: true });
+                pitches: [attack.midi], sourceNoteId: `${first.note.id}-grace-${index}`, graceNote: true, notationNoteIds: [first.note.beforeGraceNotes![index].id] });
             });
           }
         }
@@ -206,6 +208,12 @@ namespace ScorePlaybackPlan {
             pitches: first.note.pitches.map(pitch => pitch.midi), sourceNoteId: first.note.id });
         }
         for (const event of noteEvents) {
+          event.notationNoteIds ??= members.map(member => member.note.id);
+          if (!event.graceNote && members.length > 1) event.notationRanges = members.map((member, index) => ({
+            noteId: member.note.id,
+            startSeconds: index === 0 ? event.startSeconds : clock.secondsAt(member.measureStartSixteenths + member.positionSixteenths) - startSeconds,
+            endSeconds: index === members.length - 1 ? undefined : clock.secondsAt(member.measureStartSixteenths + member.positionSixteenths + member.lengthSixteenths) - startSeconds,
+          }));
           const position = clock.positionAt(startSeconds + event.startSeconds);
           let baseVelocity = 88;
           for (const change of prepared.dynamics) {
@@ -278,6 +286,7 @@ namespace ScorePlaybackPlan {
         const start = timeAt(event.startSeconds);
         const pitchDurationsSeconds = event.pitchDurationsSeconds?.map(duration => timeAt(event.startSeconds + duration) - start);
         return { ...event, startSeconds: start,
+          notationRanges: event.notationRanges?.map(range => ({ ...range, startSeconds: timeAt(range.startSeconds), endSeconds: range.endSeconds === undefined ? undefined : timeAt(range.endSeconds) })),
           durationSeconds: timeAt(event.startSeconds + event.durationSeconds) - start,
           ...(pitchDurationsSeconds ? { pitchDurationsSeconds } : {}) };
       }) };

@@ -84,7 +84,8 @@ namespace PreviewMusicXml {
     const initial = outline[0].data;
     const noteTargets = visible.flatMap((measure, measureOffset) => [measure.data.upperStaff, measure.data.lowerStaff].flatMap((staff, staffIndex) =>
       staff.voices.flatMap((voice, voiceIndex) => ScoreVoice.flatten(voice, measure.data.length).flatMap(entry => entry.element.kind === 'note'
-        ? [{ noteId: entry.element.id, measureOffset, staffIndex, voiceNumber: staffIndex * 3 + voiceIndex + 1, position: entry.positionSixteenths }] : []))));
+        ? [{ noteId: entry.element.id, measureOffset, staffIndex, voiceNumber: staffIndex * 3 + voiceIndex + 1, position: entry.positionSixteenths },
+          ...(entry.element.beforeGraceNotes ?? []).map((grace, graceIndex) => ({ noteId: grace.id, measureOffset, staffIndex, voiceNumber: staffIndex * 3 + voiceIndex + 1, position: entry.positionSixteenths, graceIndex }))] : []))));
     const slurMarks = new Map<string, string>();
     // Non-overlapping ranges per staff/voice require at most six simultaneous numbers.
     for (const span of ScoreSlur.ranges({ outline, slurs })) {

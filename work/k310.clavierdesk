@@ -1633,7 +1633,7 @@
                   "pitches": [
                     {
                       "midi": 75,
-                      "spellingDirection": "down"
+                      "spellingDirection": "up"
                     },
                     {
                       "midi": 71
@@ -8766,17 +8766,12 @@
                   ]
                 },
                 {
-                  "id": "87ae5dc8-5f71-4c9a-8611-9b4f0a5c0737",
-                  "kind": "note",
+                  "id": "rest-e9e5ef92-b446-43b3-a98f-1209650e88ac",
+                  "kind": "rest",
                   "value": {
                     "type": "quarter",
                     "dots": 0
-                  },
-                  "pitches": [
-                    {
-                      "midi": 55
-                    }
-                  ]
+                  }
                 },
                 {
                   "id": "4cdd3502-be4b-496c-a6fc-8f0023cab65d",

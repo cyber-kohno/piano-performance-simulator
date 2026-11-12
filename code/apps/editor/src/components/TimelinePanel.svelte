@@ -30,7 +30,8 @@
     type TimelineCursor,
   } from "../state/timeline-cursor";
 
-  let { outline, cursor, timelineCursor, mode, pedalMode = false, pedalCursor, ottavaMode = false, ottavaCursor, playbackPosition = null, playbackActive = false, expressionModalOpen = false, trills = [], tempoChanges = [], clefChanges = [], dynamicChanges = [], slurs = [] }: {
+  let { getPlayingNoteIds = () => [], outline, cursor, timelineCursor, mode, pedalMode = false, pedalCursor, ottavaMode = false, ottavaCursor, playbackPosition = null, playbackActive = false, expressionModalOpen = false, trills = [], tempoChanges = [], clefChanges = [], dynamicChanges = [], slurs = [] }: {
+    getPlayingNoteIds?: () => readonly string[];
     slurs?: ScoreProject['slurs'];
     dynamicChanges?: ScoreProject['dynamicChanges'];
     tempoChanges?: ScoreProject['tempoChanges'];
@@ -153,6 +154,9 @@
     ? playbackPosition : mode === 'timeline'
       ? timelineCursor.positionSixteenths : timelineIndex.blockPositions.get(cursor.blockId) ?? 0));
   const statusMeasure = $derived(statusEntry?.measure);
+  // A scalar ID keeps vertical fitting independent of playback's position ticks.
+  const verticalFocusMeasureId = $derived(playbackActive
+    ? statusMeasure?.id ?? null : mode === 'outline' ? cursor.blockId : null);
   const statusMeasureNumber = $derived(statusEntry ? statusEntry.index + 1 : null);
   const previewActiveIndex = $derived.by(() => {
     if (statusMeasureNumber !== null) return statusMeasureNumber - 1;
@@ -281,7 +285,7 @@
     animateTimelineScroll(scrollLeft);
   });
   $effect(() => {
-    if (mode !== 'timeline' || !pianoRollViewport || !pitchScrollViewport) return;
+    if (playbackActive || mode !== 'timeline' || !pianoRollViewport || !pitchScrollViewport) return;
 
     const pitchIndex = 108 - timelineCursor.pitch;
     const pitchRowCenter = pitchIndex * pitchRowHeight + pitchRowHeight / 2;
@@ -297,16 +301,15 @@
   });
 
   $effect(() => {
-    const blockId = cursor.blockId;
+    const blockId = verticalFocusMeasureId;
     const roll = pianoRollViewport;
     const pitch = pitchScrollViewport;
-    if (mode !== 'outline' || !roll || !pitch) return;
+    if ((!playbackActive && mode !== 'outline') || !roll || !pitch) return;
     // Scroll events and score edits must not pull the viewport back after the
-    // user has adjusted it. Only entering outline mode / changing focus fits it.
+    // user has adjusted it. Fit on playback start / measure changes, or outline focus.
     untrack(() => {
       for (const timer of verticalScrollTimers) window.clearTimeout(timer);
       verticalScrollTimers = [];
-      if (playbackActive) return;
       const measure = outline.find(block => block.id === blockId);
       if (measure?.type !== 'measure') return;
       const top = TimelineView.bestPitchScrollTop(TimelineView.measurePitches(measure), roll.scrollTop,
@@ -668,7 +671,7 @@
   </aside>
   {/if}
   {#if !expressionModalOpen}
-    <ScorePreview {outline} {trills} {tempoChanges} {clefChanges} {slurs} {dynamicChanges}
+    <ScorePreview {playbackActive} {getPlayingNoteIds} {outline} {trills} {tempoChanges} {clefChanges} {slurs} {dynamicChanges}
       selectedNoteIds={mode !== 'timeline' || playbackPosition !== null || pedalMode || ottavaMode ? [] : selectedNotes.map(entry => entry.note.id)} activeIndex={previewActiveIndex} />
   {/if}
 </section>
