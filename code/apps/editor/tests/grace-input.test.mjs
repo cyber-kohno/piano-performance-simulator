@@ -8,6 +8,10 @@ import { createTimelineCursor, addTimelineNoteAt, getLocatedTimelineNote, getLoc
 import { addBeforeGrace, cycleGraceFocus, focusGraceParent, getFocusedGrace, moveGracePitch,
   deleteFocusedGrace, getGraceRollLayout } from '../src/state/grace-input.ts';
 import { createScorePreview } from '../src/model/score-preview.ts';
+import NoteEditor from '../src/action/editor/note-editor.ts';
+import NotePitches from '../src/domain/score/note-pitches.ts';
+import Validator from '../src/domain/score/score-project-validator.ts';
+import EditorHistory from '../src/service/history/editor-history.ts';
 function score() {
   const p=createProject();
   for(let i=0;i<3;i++) p.outline.push({id:`m${i}`,type:'measure',data:createMeasureData({cnt:4,unit:4})});
@@ -19,6 +23,65 @@ function placed(type='quarter',position=0,midi=60) {
 const parent=s=>getLocatedTimelineNote(s.project.outline,s.cursor.focusedNoteId,s.cursor.staff).note;
 const graced=s=>addBeforeGrace(s.project,s.cursor);
 const parentFocus=s=>({...s,cursor:focusGraceParent(s.project.outline,s.cursor)});
+
+test('fingering follows grace focus, preserves other notes, and survives history and serialization',()=>{
+  let s=graced(placed());
+  s=graced(s);
+  s=parentFocus(s);
+  s.project=NoteEditor.setPitchFingering(s.project,s.cursor,5);
+  s.cursor=cycleGraceFocus(s.project.outline,s.cursor);
+  const before=structuredClone(s.project);
+  const history=EditorHistory.create({project:s.project,timelineCursor:s.cursor});
+  assert.equal(NoteEditor.setPitchFingering(s.project,s.cursor,1,2),s.project);
+  const updated=NoteEditor.setPitchFingering(s.project,s.cursor,1);
+  const updatedParent=parent({...s,project:updated});
+  assert.deepEqual(updatedParent.pitches,[{midi:60,fingering:5}]);
+  assert.deepEqual(updatedParent.beforeGraceNotes[0].pitches,[{midi:59,fingering:1}]);
+  assert.deepEqual(updatedParent.beforeGraceNotes[1],parent(s).beforeGraceNotes[1]);
+  assert.deepEqual(s.project,before);
+  history.record({project:updated,timelineCursor:s.cursor});
+  assert.deepEqual(history.undo().project,before);
+  assert.equal(history.redo().project,updated);
+  const restored=JSON.parse(JSON.stringify(updated));
+  assert.equal(Validator.isValid(restored),true);
+  assert.deepEqual(restored,updated);
+  const xml=createScorePreview(restored.outline,0).xml;
+  assert.match(xml.match(/<note><grace[\s\S]*?<\/note>/)[0],/<fingering>1<\/fingering>/);
+  const single=NoteEditor.setPitchFingering(updated,s.cursor,3);
+  assert.deepEqual(parent({...s,project:single}).beforeGraceNotes[0].pitches,[{midi:59,fingering:3}]);
+  const secondCursor=cycleGraceFocus(single.outline,s.cursor);
+  const second=NoteEditor.setPitchFingering(single,secondCursor,4);
+  assert.equal(parent({...s,project:second}).beforeGraceNotes[1].pitches[0].fingering,4);
+  assert.equal(parent({...s,project:second}).beforeGraceNotes[0].pitches[0].fingering,3);
+  const parentCursor=cycleGraceFocus(second.outline,secondCursor);
+  const changedParent=NoteEditor.setPitchFingering(second,parentCursor,2);
+  assert.equal(parent({...s,project:changedParent}).pitches[0].fingering,2);
+  assert.deepEqual(parent({...s,project:changedParent}).beforeGraceNotes,parent({...s,project:second}).beforeGraceNotes);
+});
+
+test('missing grace targets never fall back to parent fingering, and removal clears both numbers',()=>{
+  const s=graced(placed());
+  const missing={...s.cursor,focusedGraceId:'missing'};
+  assert.equal(NoteEditor.setPitchFingering(s.project,missing,2),s.project);
+  assert.equal(NoteEditor.setPitchFingering(s.project,{...s.cursor,focusedPitchIndex:9},2),s.project);
+  const updated=NoteEditor.setPitchFingering(s.project,s.cursor,1);
+  const cleared=NotePitches.setFingering(updated,{
+    noteId:s.cursor.focusedNoteId,staff:s.cursor.staff,pitchIndex:0,graceNoteId:s.cursor.focusedGraceId,
+  },null);
+  assert.deepEqual(parent({...s,project:cleared}).beforeGraceNotes,parent(s).beforeGraceNotes);
+});
+
+test('lower-staff grace fingering respects staff targeting',()=>{
+  const placedLower=addTimelineNoteAt(score(),{...createTimelineCursor(),staff:'lowerStaff'},0,48);
+  const s=graced(placedLower);
+  assert.equal(NoteEditor.setPitchFingering(s.project,s.cursor,4,3),s.project);
+  const updated=NoteEditor.setPitchFingering(s.project,s.cursor,4);
+  assert.equal(Validator.isValid(updated),true);
+  assert.deepEqual(parent({...s,project:updated}).beforeGraceNotes[0].pitches,[{midi:47,fingering:4}]);
+  assert.deepEqual(parent({...s,project:updated}).pitches,[{midi:48}]);
+  assert.equal(NoteEditor.setPitchFingering(updated,s.cursor,4),updated);
+  assert.equal(NoteEditor.setPitchFingering(updated,{...s.cursor,staff:'upperStaff'},2),updated);
+});
 function lengths(p) {
   return p.outline.filter(b=>b.type==='measure').map(b=>['upperStaff','lowerStaff'].flatMap(staff=>b.data[staff].voices.map(v=>
     getFlattenedVoiceElements(v,b.data.length).reduce((sum,e)=>sum+e.lengthSixteenths,0))));

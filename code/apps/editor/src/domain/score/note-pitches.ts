@@ -5,7 +5,9 @@ import ScoreTies from './score-ties.ts';
 import PianoPitchRules from './piano-pitch-rules.ts';
 import PitchSpelling from '../theory/pitch-spelling.ts';
 import ScoreKey from './score-key.ts';
+import ScoreFingerings from './score-fingerings.ts';
 export type PitchTarget={ noteId: string; staff: PianoStaffName; pitchIndex: number };
+export type FingeringTarget = PitchTarget & { graceNoteId?: string };
 export type PitchEditResult={ project: ScoreProject; midi: number; pitchIndex: number };
 namespace NotePitches {
   export function move(
@@ -33,6 +35,7 @@ namespace NotePitches {
         return { ...base,midi,...(octave ? pitch.spellingDirection === undefined ? {} : { spellingDirection: pitch.spellingDirection } : spellingDirection ? { spellingDirection } : {}) };
       }).sort((a,b) => b.midi-a.midi),
     }),target.staff);
+    ScoreTimeline.inheritTiming(project.outline, nextProject.outline);
     if(ScoreNotes.collides(project.outline,nextProject.outline,target.staff,ids)) return undefined;
     return {
       project: nextProject,
@@ -58,22 +61,29 @@ namespace NotePitches {
     };
   }
 
-  export function setFingering(project: ScoreProject,target: PitchTarget,fingering: PianoFingering,
+  export function setFingering(project: ScoreProject,target: FingeringTarget,fingering: PianoFingering | null,
     substitutionFingering?: PianoFingering): ScoreProject {
     const located=ScoreTimeline.note(project.outline,target.noteId,target.staff);
-    const current=located?.note.pitches[target.pitchIndex];
-    if(!located||!current||current.fingering===fingering&&current.substitutionFingering===substitutionFingering) return project;
+    const pitches = target.graceNoteId === undefined ? located?.note.pitches
+      : located?.note.beforeGraceNotes?.find(grace => grace.id === target.graceNoteId)?.pitches;
+    const current=pitches?.[target.pitchIndex];
+    if(!located||!pitches||!current) return project;
+    if (fingering !== null && !ScoreFingerings.allows(
+      ScoreFingerings.rules(located.note, target.pitchIndex, target.graceNoteId), fingering, substitutionFingering,
+    )) return project;
+    if (fingering === null ? current.fingering === undefined && current.substitutionFingering === undefined
+      : current.fingering===fingering&&current.substitutionFingering===substitutionFingering) return project;
+    const updatedPitches = pitches.map((pitch,index) => {
+      if(index!==target.pitchIndex) return pitch;
+      const { fingering: _previous, substitutionFingering: _previousSubstitution, ...base }=pitch;
+      return { ...base, ...(fingering === null ? {} : { fingering,
+        ...(substitutionFingering === undefined ? {} : { substitutionFingering }) }) };
+    });
     return ScoreNotes.map(project,new Set([target.noteId]),note => ({
       ...note,
-      pitches: note.pitches.map((pitch,index) => {
-        if(index!==target.pitchIndex) return pitch;
-        const { substitutionFingering: _previousSubstitution, ...base }=pitch;
-        return {
-          ...base,
-          fingering,
-          ...(substitutionFingering === undefined ? {} : { substitutionFingering }),
-        };
-      }),
+      ...(target.graceNoteId === undefined ? { pitches: updatedPitches }
+        : { beforeGraceNotes: note.beforeGraceNotes!.map(grace =>
+          grace.id === target.graceNoteId ? { ...grace, pitches: updatedPitches } : grace) }),
     }),target.staff);
   }
 
@@ -99,6 +109,7 @@ namespace NotePitches {
       const spellingDirection=PitchSpelling.directionForMove(midi,keyByNote.get(note.id)!,direction===1?'up':'down');
       return { ...base,midi,...(spellingDirection?{ spellingDirection}:{}) };
     }) }),staff);
+    if (ScoreTimeline.isPrepared(project.outline)) ScoreTimeline.prepare(next.outline);
     if(ScoreNotes.collides(project.outline,next.outline,staff,ids)) return undefined;
     return { ...next,outline: ScoreTies.reconcile(next.outline) };
   }

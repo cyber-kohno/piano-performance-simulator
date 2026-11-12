@@ -56,12 +56,12 @@ namespace NoteEditor {
     const next = NotePitches.transpose(project,cursor.staff,selected.map(entry=>entry.note.id),direction,octave);
     if (!next) return undefined;
     const focused = selected.find(entry=>entry.note.id===cursor.focusedNoteId)!;
-    return finish(project,{project:next,cursor:{...cursor,focusedPitchIndex:null,pitch:focused.note.pitches[0].midi+interval}});
+    return {project:EditTransaction.commitPitches(project,next),cursor:{...cursor,focusedPitchIndex:null,pitch:focused.note.pitches[0].midi+interval}};
   }
   export function movePitch(project: ScoreProject, cursor: Timeline.TimelineCursor, direction: -1 | 1, key?: KeySignature, octave = false) {
     if (!cursor.focusedNoteId || cursor.focusedPitchIndex === null) return undefined;
     const result = NotePitches.move(project,{noteId:cursor.focusedNoteId,staff:cursor.staff,pitchIndex:cursor.focusedPitchIndex},direction,key,octave);
-    return result && finish(project,{project:result.project,cursor:{...cursor,pitch:result.midi,focusedPitchIndex:result.pitchIndex}});
+    return result && {project:EditTransaction.commitPitches(project,result.project),cursor:{...cursor,pitch:result.midi,focusedPitchIndex:result.pitchIndex}};
   }
   export function addPitch(project: ScoreProject, cursor: Timeline.TimelineCursor) {
     if (!cursor.focusedNoteId || cursor.focusedPitchIndex === null) return undefined;
@@ -73,6 +73,7 @@ namespace NoteEditor {
     if (!cursor.focusedNoteId || cursor.focusedPitchIndex === null) return project;
     const next = NotePitches.setFingering(project, {
       noteId: cursor.focusedNoteId, staff: cursor.staff, pitchIndex: cursor.focusedPitchIndex,
+      graceNoteId: cursor.focusedGraceId ?? undefined,
     }, fingering, substitutionFingering);
     return next === project ? project : EditTransaction.commit(project, next);
   }

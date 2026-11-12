@@ -18,6 +18,7 @@ import {
 } from "./types.ts";
 
 import NoteOrder from './note-order.ts';
+import ScoreTimeline from './score-timeline.ts';
 import type { VoiceScope } from './note-target.ts';
 export type TupletTarget = VoiceScope & { position: number; noteId: string | null };
 namespace TupletNotes {
@@ -46,6 +47,18 @@ namespace TupletNotes {
     return contexts;
   }
   export function context(outline: readonly OutlineBlock[], target: TupletTarget, position = target.position, useFocus = true) {
+    if (ScoreTimeline.isPrepared(outline)) {
+      const focused = useFocus && target.noteId !== null ? ScoreTimeline.note(outline, target.noteId, target.staff) : undefined;
+      if (useFocus && target.noteId !== null && (!focused?.tuplet || focused.voiceIndex !== target.voiceIndex)) return undefined;
+      const located = focused ? { measure: focused.measure, startSixteenths: focused.measureStartSixteenths }
+        : ScoreTimeline.index(outline).measureAt(position);
+      if (!located) return undefined;
+      const offset = located.startSixteenths;
+      return contexts([located.measure], target).map(context => ({ ...context, measureStart: offset,
+        start: offset + context.start, end: offset + context.end })).find(context => useFocus && target.noteId !== null
+          ? context.group.elements.some(child => child.id === target.noteId)
+          : MusicalTime.compareNumbers(position, context.start) >= 0 && MusicalTime.compareNumbers(position, context.end) < 0);
+    }
     return contexts(outline, target).find((context) => useFocus && target.noteId !== null
       ? context.group.elements.some((child) => child.id === target.noteId)
       : MusicalTime.compareNumbers(position, context.start) >= 0 && MusicalTime.compareNumbers(position, context.end) < 0);

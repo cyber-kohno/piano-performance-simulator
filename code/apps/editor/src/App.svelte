@@ -25,7 +25,9 @@
 
   import { controlNoteMenu, createNoteMenuItems } from './state/note-menu';
 
-  import { type PianoFingering, type ScoreProject } from "./domain/score/types.ts";
+  import { type ScoreProject } from "./domain/score/types.ts";
+  import ScoreFingerings, { type FingeringRules } from './domain/score/score-fingerings.ts';
+  import FingeringInput from './state/fingering-input.ts';
   import { createKeyHold } from './state/key-hold.svelte';
   import {createTimelineCursor,getSelectedTimelineNotes} from './state/timeline-cursor.ts';
   import {createOutlineCursor} from './state/outline-cursor.ts';
@@ -36,6 +38,7 @@
   import EditorHistory, { type EditorHistorySnapshot } from './service/history/editor-history.ts';
   import EditorDialogController from './service/dialog/editor-dialog-controller.ts';
   import ScoreProjectFileController, { type FileOperationResult } from './service/project/score-project-file-controller.ts';
+  import { createProjectFingerprint } from './service/project/project-fingerprint.ts';
   import type { ScorePassage as ScorePassageData } from './domain/score/score-passage.ts';
   import { invoke, isTauri } from '@tauri-apps/api/core';
   import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -111,15 +114,17 @@
 
   const initialProject = ScoreProjectFactory.create();
   let project = $state<ScoreProject>(initialProject);
+  $effect.pre(() => { ScoreTimeline.prepare(project.outline); });
   const playbackTimelineIndex = $derived(ScoreTimeline.index(project.outline));
   $effect(() => {
     const revision = project;
-    untrack(() => playback?.prepare(revision));
+    untrack(() => playback?.invalidate(revision));
   });
   let currentProjectFile = $state<ScoreProjectFileController.Handle | null>(null);
   let savedProjectFingerprint = $state(ScoreProjectFileController.fingerprint(initialProject));
   let fileOperationInProgress = $state(false);
-  const projectFingerprint = $derived(ScoreProjectFileController.fingerprint(project));
+  const fingerprintProject = createProjectFingerprint();
+  const projectFingerprint = $derived(fingerprintProject(project));
   const projectIsDirty = $derived(projectFingerprint !== savedProjectFingerprint);
   let allowWindowClose = false;
   const windowTitle = $derived(`${currentProjectFile?.name ?? 'Untitled'}${projectIsDirty ? '*' : ''} - ClavierDesk`);
@@ -137,7 +142,7 @@
   let noteSettings=$state<NoteSettingsState|null>(null);
   let passageClipboard = $state<ScorePassageData | null>(null);
   let sectionTextInput = $state<({ blockId: string; anchor: HTMLElement } & FloatingTextState) | null>(null);
-  let fingeringTextInput = $state<({ noteId: string; pitchIndex: number; anchor: HTMLElement } & FloatingTextState) | null>(null);
+  let fingeringTextInput = $state<({ noteId: string; graceNoteId?: string; pitchIndex: number; anchor: HTMLElement; rules: FingeringRules } & FloatingTextState) | null>(null);
   // Every UI mutation entry uses this gate; MCP writes use their separate checkout path.
   function uiEditAllowed() { return !mcpCheckout; }
   function stopMcpEditing() {
@@ -159,29 +164,25 @@
     } else if (fingeringTextInput) fingeringTextInput = { ...fingeringTextInput, ...result.state };
     else if (sectionTextInput) sectionTextInput = { ...sectionTextInput, ...result.state };
   }
-  function parseFingeringInput(value: string): { fingering: PianoFingering; substitutionFingering?: PianoFingering } | undefined {
-    const match = /^([1-5])(?:-([1-5]))?$/.exec(value);
-    if (!match) return undefined;
-    const fingering = Number(match[1]) as PianoFingering;
-    const substitutionFingering = match[2] === undefined ? undefined : Number(match[2]) as PianoFingering;
-    if (substitutionFingering === fingering) return undefined;
-    return substitutionFingering === undefined ? { fingering } : { fingering, substitutionFingering };
-  }
   function openFingeringTextInput() {
     if (!uiEditAllowed() || mode !== 'timeline' || pedalMode || ottavaMode || playback?.playing ||
       timelineCursor.focusedNoteId === null || timelineCursor.focusedPitchIndex === null ||
-      selectedTimelineNotes.length !== 1 || getFocusedGrace(project.outline, timelineCursor)) return false;
+      selectedTimelineNotes.length !== 1) return false;
     const focused = ScoreTimeline.note(project.outline, timelineCursor.focusedNoteId, timelineCursor.staff);
-    const pitch = focused?.note.pitches[timelineCursor.focusedPitchIndex];
+    const grace = getFocusedGrace(project.outline, timelineCursor)?.grace;
+    if (timelineCursor.focusedGraceId && !grace) return false;
+    const pitch = (grace?.pitches ?? focused?.note.pitches)?.[timelineCursor.focusedPitchIndex];
     if (!focused || !pitch) return false;
-    const target = `${focused.note.id}:${timelineCursor.focusedPitchIndex}`;
+    const target = `${grace?.id ?? focused.note.id}:${timelineCursor.focusedPitchIndex}`;
     const anchor = Array.from(document.querySelectorAll<HTMLElement>('[data-fingering-pitch]'))
       .find(element => element.dataset.fingeringPitch === target);
     if (!anchor) return false;
     fingeringTextInput = {
       noteId: focused.note.id,
+      graceNoteId: grace?.id,
       pitchIndex: timelineCursor.focusedPitchIndex,
       anchor,
+      rules: ScoreFingerings.rules(focused.note, timelineCursor.focusedPitchIndex, grace?.id),
       ...FloatingText.create(pitch.fingering === undefined ? '' : `${pitch.fingering}${pitch.substitutionFingering === undefined ? '' : `-${pitch.substitutionFingering}`}`),
     };
     keyHold.reset();
@@ -189,12 +190,13 @@
   }
   function commitFingeringText(value: string) {
     if (!uiEditAllowed() || !fingeringTextInput) return;
-    const parsed = parseFingeringInput(value);
+    const parsed = FingeringInput.parse(value, fingeringTextInput.rules);
     if (!parsed) return;
     const previousProject = project;
     project = NoteEditor.setPitchFingering(project, {
       ...timelineCursor,
       focusedNoteId: fingeringTextInput.noteId,
+      focusedGraceId: fingeringTextInput.graceNoteId ?? null,
       focusedPitchIndex: fingeringTextInput.pitchIndex,
     }, parsed.fingering, parsed.substitutionFingering);
     fingeringTextInput = null;
@@ -719,9 +721,11 @@
     const focusedBeforeInput = timelineCursor.focusedNoteId
       ? ScoreTimeline.note(project.outline, timelineCursor.focusedNoteId, timelineCursor.staff)
       : undefined;
+    ScoreTimeline.prepare(project.outline);
     const result=WorkspaceKeyboard.control({project,outlineCursor,timelineCursor,mode},event,keyHold,measureKeyCache);
     if(result.handled)event.preventDefault();
     project=result.project;
+    ScoreTimeline.prepare(project.outline, result.project.outline);
     outlineCursor=result.outlineCursor;
     timelineCursor=result.timelineCursor;
     mode=result.mode;
@@ -793,7 +797,7 @@
 {/if}
 {#if !mcpCheckout && fingeringTextInput}
   <FloatingTextInput anchor={fingeringTextInput.anchor} draft={fingeringTextInput} label="Piano fingering"
-    accept={(value) => parseFingeringInput(value) !== undefined}
+    accept={(value) => fingeringTextInput !== null && FingeringInput.parse(value, fingeringTextInput.rules) !== undefined}
     onCancel={() => fingeringTextInput = null} />
 {/if}
 {#if !mcpCheckout && noteSettings}

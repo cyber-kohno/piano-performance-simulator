@@ -111,3 +111,54 @@ test('transport reuses preparation and plans, invalidates edits and converts pro
   callbacks.ended();
   assert.equal(player.playing, false);
 });
+
+test('edits only invalidate playback; the next start prepares the latest revision once', t => {
+  const oldWindow = globalThis.window;
+  globalThis.window = { setInterval() { return 1; }, clearInterval() {} };
+  let builds = 0, plans = 0;
+  const prepare = Plan.prepare;
+  t.mock.method(Plan, 'prepare', project => {
+    builds++;
+    const snapshot = prepare(project);
+    return { ...snapshot, create(position) { plans++; return snapshot.create(position); } };
+  });
+  const sequences = [];
+  const player = Playback.create({
+    startSequence(sequence) { sequences.push(sequence); return { currentTime: 0 }; }, stop() {},
+  });
+  t.after(() => { player.dispose(); globalThis.window = oldWindow; });
+  const original = fixture();
+  player.invalidate(original);
+  let latest;
+  for (const pitch of [61, 62, 63]) {
+    latest = structuredClone(original);
+    Timeline.notes(latest.outline)[0].note.pitches[0].midi = pitch;
+    player.invalidate(latest);
+  }
+  assert.equal(builds, 0);
+  assert.equal(plans, 0);
+  const start = (project, position = 0) => {
+    assert.equal(player.start(project, position, () => {}, () => {}), true);
+    player.stop();
+  };
+  start(latest);
+  assert.equal(builds, 1);
+  assert.equal(plans, 1);
+  assert.equal(sequences.at(-1).events[0].pitches[0], 63);
+  player.invalidate(latest); // A repeated notification is not an edit.
+  start(latest);
+  assert.equal(builds, 1);
+  assert.equal(plans, 1);
+  assert.equal(sequences.at(-1), sequences.at(-2));
+  start(latest, 4); // A different start reuses preparation, but creates a new plan.
+  assert.equal(builds, 1);
+  assert.equal(plans, 2);
+  player.invalidate(original); // Undo must rebuild the restored score.
+  assert.equal(builds, 1);
+  start(original);
+  assert.equal(builds, 2);
+  assert.equal(sequences.at(-1).events[0].pitches[0], 60);
+  player.dispose();
+  start(original);
+  assert.equal(builds, 3);
+});

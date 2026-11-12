@@ -230,7 +230,7 @@
   const measureContents = $derived.by(() => visibleMeasureIndices.map(index => {
     const measure = measures[index];
     const layout = headerMeasures[index];
-    const notes = TimelineView.notesForMeasure(measure, notesWithVisualGap, independentNoteGapPixels, pixelsPerSixteenth);
+    const notes = TimelineView.notesForMeasure(measure, notesWithVisualGap, independentNoteGapPixels, pixelsPerSixteenth, ScoreTimeline.isPrepared(outline));
     const voice = measure.data[timelineCursor.staff].voices[timelineCursor.voiceIndex];
     const tuplets = voice ? ScoreVoice.locate(voice, measure.data.length)
       .filter(entry => entry.element.kind === 'tuplet')
@@ -545,6 +545,7 @@
               {/if}
               {#each grace.pitches as pitch, pitchIndex (`${grace.id}-${pitch.midi}`)}
                 <div class="score-grace-note" role="img"
+                  data-fingering-pitch={`${grace.id}:${pitchIndex}`}
                   class:spelling-default={!pitch.spellingDirection} class:spelling-up={pitch.spellingDirection === 'up'} class:spelling-down={pitch.spellingDirection === 'down'}
                   class:inactive={pedalMode || mode === 'outline' || entry.staff !== timelineCursor.staff || entry.voiceIndex !== timelineCursor.voiceIndex}
                   class:lower-staff={entry.staff === 'lowerStaff'}
@@ -552,6 +553,11 @@
                   aria-label={`${entry.staff === 'upperStaff' ? 'Upper' : 'Lower'} staff grace ${graceIndex + 1} of ${note.id}, MIDI ${pitch.midi}`}
                   aria-current={graceSelected && pitchIndex === 0 ? 'true' : undefined}
                   style={`left: ${entry.position * pixelsPerSixteenth + geometry.x - geometry.diameter / 2}px; top: ${pitchTopMargin + (108 - pitch.midi) * pitchRowHeight + (pitchRowHeight - geometry.diameter) / 2}px; width: ${geometry.diameter}px; height: ${geometry.diameter}px`}></div>
+                {#if pitch.fingering !== undefined}
+                  <span class="fingering-badge grace-fingering-badge" aria-hidden="true"
+                    style={`left: ${entry.position * pixelsPerSixteenth + geometry.x}px; top: ${pitchTopMargin + (108 - pitch.midi) * pitchRowHeight + (pitchRowHeight + geometry.diameter) / 2 + 2}px`}
+                  >{pitch.fingering}{pitch.substitutionFingering === undefined ? '' : `-${pitch.substitutionFingering}`}</span>
+                {/if}
               {/each}
             {/each}
           {/each}
@@ -1166,6 +1172,10 @@
     line-height: 12px;
     white-space: nowrap;
     pointer-events: none;
+  }
+
+  .grace-fingering-badge {
+    transform: translateX(-50%);
   }
 
   .note-focus-column {

@@ -47,8 +47,13 @@ namespace ScoreVoice {
   }
 
   export function mapNotes(voice: PianoVoice, update: (note: PianoNote) => PianoNote | PianoRest): PianoVoice {
-    return { ...voice, elements: voice.elements.map((element) => element.kind === 'note' ? update(element)
-      : element.kind === 'tuplet' ? { ...element, elements: element.elements.map((child) => child.kind === 'note' ? update(child) : child) } : element) };
+    const elements = voice.elements.map(element => {
+      if (element.kind === 'note') return update(element);
+      if (element.kind !== 'tuplet') return element;
+      const children = element.elements.map(child => child.kind === 'note' ? update(child) : child);
+      return children.every((child, index) => child === element.elements[index]) ? element : { ...element, elements: children };
+    });
+    return elements.every((element, index) => element === voice.elements[index]) ? voice : { ...voice, elements };
   }
 
 }

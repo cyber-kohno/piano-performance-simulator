@@ -18,6 +18,7 @@ namespace ScoreClef {
     });
   }
   export function changes(project: ScoreProject) {
+    if (!project.clefChanges?.length) return [];
     const anchors = new Map(ScoreClef.anchors(project).map(anchor => [anchor.noteId, anchor]));
     return (project.clefChanges ?? []).flatMap(change => {
       const anchor = anchors.get(change.noteId);

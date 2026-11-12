@@ -8,16 +8,18 @@
   let message = $state<string | null>(null);
   let paintSelection = $state<((ids: readonly string[]) => void) | null>(null);
   $effect(() => { paintSelection?.(selectedNoteIds); });
-  const prepared = $derived(PreviewMusicXml.prepare(outline));
-  const preview = $derived(PreviewMusicXml.create(outline, activeIndex, trills, tempoChanges, clefChanges, slurs, dynamicChanges, prepared));
   $effect(() => {
-    const target=host, document=preview;
+    // Capture dependencies now, but defer preparation as well as rendering.
+    // Held-key edits cancel the entire pending preview calculation.
+    const target=host, score=outline, index=activeIndex, ornaments=trills,
+      tempos=tempoChanges, clefs=clefChanges, curves=slurs, dynamics=dynamicChanges;
     paintSelection=null;
     if(!target)return;
-    if(!document){target.replaceChildren();message='No measures';return;}
     const controller=new AbortController();
     const timer=window.setTimeout(async()=>{
       try {
+        const document=PreviewMusicXml.create(score,index,ornaments,tempos,clefs,curves,dynamics);
+        if (!document) { target.replaceChildren(); message='No measures'; return; }
         const painter=await ScorePreviewRenderer.render(target,document,controller.signal);
         if(controller.signal.aborted)return;
         paintSelection=painter??null;

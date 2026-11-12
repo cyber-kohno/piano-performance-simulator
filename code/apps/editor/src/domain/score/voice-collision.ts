@@ -16,12 +16,17 @@ namespace VoiceCollision {
     outline: readonly OutlineBlock[], spans: readonly VoicePitchSpan[],
   ): boolean {
     const proposals = spans.map((span) => ({ ...span, midis: new Set(span.pitches.map(({ midi }) => midi)) }));
+    if (!proposals.length) return false;
     let measureStart = 0;
     for (const block of outline) {
       if (block.type !== 'measure') continue;
+      const measureEnd = measureStart + block.data.length.cnt / block.data.length.unit * 16;
+      const overlapping = proposals.filter(span => span.startSixteenths < measureEnd &&
+        span.startSixteenths + span.lengthSixteenths > measureStart);
+      if (!overlapping.length) { measureStart = measureEnd; continue; }
       for (const staff of ['upperStaff', 'lowerStaff'] as const) {
         for (const voice of block.data[staff].voices) {
-          const otherVoices = proposals.filter((span) => span.staff !== staff || span.voiceId !== voice.id);
+          const otherVoices = overlapping.filter((span) => span.staff !== staff || span.voiceId !== voice.id);
           if (!otherVoices.length) continue;
           for (const entry of ScoreVoice.flatten(voice, block.data.length)) {
             if (entry.element.kind !== 'note') continue;

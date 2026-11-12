@@ -11,6 +11,8 @@ import Integrity from '../../domain/score/score-integrity.ts';
 import Impact from '../../domain/score/score-edit-impact.ts';
 import ScoreFermata from '../../domain/score/score-fermata.ts';
 import ScoreDynamics from '../../domain/score/score-dynamics.ts';
+import NotePitches from '../../domain/score/note-pitches.ts';
+import ScoreFingerings from '../../domain/score/score-fingerings.ts';
 import MusicalTime from '../../domain/theory/musical-time.ts';
 import type { DynamicLevel, KeySignature, PianoNote, PianoStaffName, ScoreProject, TrillSettings, StaccatoSettings, ArpeggioSettings, GracePerformanceSettings, PianoFingering } from '../../domain/score/types.ts';
 
@@ -141,6 +143,12 @@ namespace ScoreEditing {
                 pitches: [{ ...Input.pitch(child.pitch, ScoreKey.forBlock(candidate.outline, target.block.id), `${path}.notes[${i}].pitch`),
                   ...(child.fingering ? { fingering: child.fingering } : {}), ...(child.substitutionFingering ? { substitutionFingering: child.substitutionFingering } : {}) }], slash: child.slash };
             });
+            for (const grace of target.item.beforeGraceNotes) {
+              const pitch = grace.pitches[0];
+              if (pitch.substitutionFingering !== undefined || pitch.fingering !== undefined && !ScoreFingerings.allows(
+                ScoreFingerings.rules(target.item, 0, grace.id), pitch.fingering,
+              )) fail('Grace notes cannot use substitution or a finger already used by a related pitch.');
+            }
             if (op.performance) target.item.gracePerformance = op.performance as GracePerformanceSettings;
             else delete target.item.gracePerformance;
           } else { delete target.item.beforeGraceNotes; delete target.item.gracePerformance; }
@@ -172,12 +180,14 @@ namespace ScoreEditing {
           if (op.graceNoteId !== undefined && !grace) fail('Grace note not found.', 'TARGET_NOT_FOUND');
           const pitch = (grace?.pitches ?? target.item.pitches)[op.pitchIndex as number];
           if (!pitch) fail('Pitch index not found.', 'TARGET_NOT_FOUND');
-          if (op.fingering === null) { delete pitch.fingering; delete pitch.substitutionFingering; }
-          else {
-            pitch.fingering = op.fingering as PianoFingering;
-            if (op.substitutionFingering === null || op.substitutionFingering === undefined) delete pitch.substitutionFingering;
-            else pitch.substitutionFingering = op.substitutionFingering as PianoFingering;
-          }
+          if (op.fingering !== null && !ScoreFingerings.allows(
+            ScoreFingerings.rules(target.item, op.pitchIndex as number, grace?.id),
+            op.fingering as PianoFingering, (op.substitutionFingering ?? undefined) as PianoFingering | undefined,
+          )) fail('Fingering is already used by a related pitch, or substitution is not allowed.');
+          candidate = NotePitches.setFingering(candidate, {
+            noteId: target.item.id, staff: target.staff, pitchIndex: op.pitchIndex as number,
+            graceNoteId: grace?.id,
+          }, op.fingering as PianoFingering | null, (op.substitutionFingering ?? undefined) as PianoFingering | undefined);
           ids.push(target.item.id);
         } else if (type === 'set_tie') {
           const source = note(op.fromNoteId).item;

@@ -117,6 +117,34 @@ test('grace notes, trills, staccato, arpeggio and fingering survive rendering an
   assert.equal(ns(project)[0].beforeGraceNotes, undefined); assert.equal(project.trills, undefined);
 });
 
+test('MCP grace fingering shares targeted updates, substitution rejection and removal with UI edits', () => {
+  let project=score(1);
+  const noteId=ns(project)[0].id;
+  project=edit(project,[{type:'set_grace_notes',noteId,notes:[
+    {pitch:'B3',value:'16',slash:true},{pitch:'A3',value:'16',slash:true},
+  ]}]);
+  const [a,b]=ns(project)[0].beforeGraceNotes;
+  project=edit(project,[
+    {type:'set_fingering',noteId,pitchIndex:0,fingering:5},
+    {type:'set_fingering',noteId,graceNoteId:a.id,pitchIndex:0,fingering:1},
+    {type:'set_fingering',noteId,graceNoteId:b.id,pitchIndex:0,fingering:3},
+  ]);
+  assert.equal(ns(project)[0].pitches[0].fingering,5);
+  assert.deepEqual(ns(project)[0].beforeGraceNotes[0].pitches,[{midi:59,fingering:1}]);
+  assert.throws(()=>edit(project,[{type:'set_fingering',noteId,graceNoteId:a.id,pitchIndex:0,fingering:1,substitutionFingering:2}]));
+  assert.throws(()=>edit(project,[{type:'set_fingering',noteId,graceNoteId:a.id,pitchIndex:0,fingering:5}]));
+  assert.throws(()=>edit(project,[{type:'set_fingering',noteId,pitchIndex:0,fingering:3}]));
+  assert.throws(()=>edit(project,[{type:'set_grace_notes',noteId,notes:[{pitch:'B3',value:'16',slash:true,fingering:1,substitutionFingering:2}]}]));
+  assert.throws(()=>edit(project,[{type:'set_grace_notes',noteId,notes:[{pitch:'B3',value:'16',slash:true,fingering:5}]}]));
+  project=edit(project,[{type:'set_fingering',noteId,graceNoteId:a.id,pitchIndex:0,fingering:4,substitutionFingering:null}]);
+  assert.deepEqual(ns(project)[0].beforeGraceNotes[0].pitches,[{midi:59,fingering:4}]);
+  project=edit(project,[{type:'set_fingering',noteId,graceNoteId:a.id,pitchIndex:0,fingering:null}]);
+  assert.deepEqual(ns(project)[0].beforeGraceNotes[0].pitches,[{midi:59}]);
+  assert.equal(ns(project)[0].beforeGraceNotes[1].pitches[0].fingering,3);
+  assert.equal(ns(project)[0].pitches[0].fingering,5);
+  assert.throws(()=>edit(project,[{type:'set_fingering',noteId,graceNoteId:'missing',pitchIndex:0,fingering:2}]));
+});
+
 test('MCP accent settings round-trip, coexist with staccato and export once per chord', () => {
   let project = score(1);
   const chordId = ns(project)[2].id;

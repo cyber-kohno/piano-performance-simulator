@@ -20,6 +20,7 @@ namespace ScoreDynamics {
     return typeof level === 'string' && levels.includes(level as DynamicLevel);
   }
   export function changes(project: ScoreProject) {
+    if (!project.dynamicChanges?.length) return [];
     const byId = new Map(anchors(project).map(anchor => [anchor.noteId, anchor]));
     return (project.dynamicChanges ?? []).flatMap(change => {
       const anchor = byId.get(change.noteId);

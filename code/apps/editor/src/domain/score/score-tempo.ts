@@ -16,6 +16,7 @@ namespace ScoreTempo {
     });
   }
   export function changes(project: ScoreProject) {
+    if (!project.tempoChanges?.length) return [];
     const anchors = new Map(ScoreTempo.anchors(project).map(anchor => [anchor.noteId, anchor]));
     return (project.tempoChanges ?? []).flatMap(change => {
       const anchor = anchors.get(change.noteId);

@@ -6,6 +6,7 @@ import type { OutlineBlock, KeySignature } from './types.ts';
 import KeyTheory from '../theory/key-signature.ts';
 export type MeasureKeyContext = { keySignature: KeySignature; pitchClasses: ReadonlySet<number> };
 namespace ScoreKey {
+  let previousCache: ReadonlyMap<string, MeasureKeyContext> = new Map();
   /** Derived cache, never saved: one outline pass; identical keys share scale data.
    * No cursor dependency, so moving the cursor cannot recolor existing measures.
    */
@@ -23,6 +24,9 @@ namespace ScoreKey {
       }
       result.set(block.id, context);
     }
+    if (result.size === previousCache.size && [...result].every(([id, context]) =>
+      previousCache.get(id)?.keySignature.fifths === context.keySignature.fifths)) return previousCache;
+    previousCache = result;
     return result;
   }
   export function contains(cache: ReadonlyMap<string, MeasureKeyContext>, measureId: string, midi: number): boolean {

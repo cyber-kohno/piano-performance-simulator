@@ -4,6 +4,10 @@ import ScoreVoice from '../domain/score/score-voice.ts';
 const staffNames = ['upperStaff', 'lowerStaff'] as const;
 export type HeaderMeasure = { id: string; number: number; start: number; width: number };
 namespace TimelineView {
+  const measureViewCache = new WeakMap<MeasureBlock, { gaps: ReadonlySet<string>; gapPixels: number;
+    pixelsPerSixteenth: number; notes: ReturnType<typeof buildMeasureNotes> }>();
+  const gapCache = new WeakMap<object, Set<string>>();
+  let previousLayout: HeaderMeasure[] = [];
   /** Maximize fully visible pitch rows; ties choose the least movement from currentTop. */
   export function bestPitchScrollTop(
     pitches: readonly number[], currentTop: number, viewportHeight: number, maxScrollTop: number,
@@ -45,6 +49,9 @@ namespace TimelineView {
   }
 
   export function visualGaps(outline: ScoreProject['outline']) {
+    const timing = ScoreTimeline.timingKey(outline);
+    const cached = timing && gapCache.get(timing);
+    if (cached) return cached;
     const measures = outline.filter(block => block.type === 'measure');
     const staffNotes = staffNames.flatMap(staff => Array.from({ length: Math.max(0, ...measures.map(measure => measure.data[staff].voices.length)) }, (_, index) => ScoreTimeline.notes(outline, staff, index)));
     const gaps = new Set<string>();
@@ -59,6 +66,7 @@ namespace TimelineView {
         if (Math.abs(currentEnd - nextStart) < 1e-8 && !isTied) gaps.add(current.note.id);
       }
     }
+    if (timing) gapCache.set(timing, gaps);
     return gaps;
   }
 
@@ -79,7 +87,14 @@ namespace TimelineView {
       }));
   }
 
-  export function notesForMeasure(measure: MeasureBlock, notesWithVisualGap: ReadonlySet<string>, gapPixels: number, pixelsPerSixteenth: number) {
+  export function notesForMeasure(measure: MeasureBlock, notesWithVisualGap: ReadonlySet<string>, gapPixels: number, pixelsPerSixteenth: number, immutable = false) {
+    const cached = immutable && measureViewCache.get(measure);
+    if (cached && cached.gaps === notesWithVisualGap && cached.gapPixels === gapPixels && cached.pixelsPerSixteenth === pixelsPerSixteenth) return cached.notes;
+    const notes = buildMeasureNotes(measure, notesWithVisualGap, gapPixels, pixelsPerSixteenth);
+    if (immutable) measureViewCache.set(measure, { gaps: notesWithVisualGap, gapPixels, pixelsPerSixteenth, notes });
+    return notes;
+  }
+  function buildMeasureNotes(measure: MeasureBlock, notesWithVisualGap: ReadonlySet<string>, gapPixels: number, pixelsPerSixteenth: number) {
     return staffNames.flatMap((staff) => measure.data[staff].voices.flatMap((voice, voiceIndex) =>
       ScoreVoice.flatten(voice, measure.data.length).flatMap((entry) => entry.element.kind === 'note' ? [{
         note: entry.element,
@@ -95,12 +110,16 @@ namespace TimelineView {
   export function layout(outline: ScoreProject['outline'], pixelsPerWhole: number): HeaderMeasure[] {
     const measures = outline.filter(block => block.type === 'measure');
     let start = 0;
-    return measures.map((measure, index) => {
+    const result = measures.map((measure, index) => {
       const width = measure.data.length.cnt / measure.data.length.unit * pixelsPerWhole;
       const result = { id: measure.id, number: index + 1, start, width };
       start += width;
       return result;
     });
+    if (result.length === previousLayout.length && result.every((measure, i) =>
+      measure.id === previousLayout[i].id && measure.start === previousLayout[i].start && measure.width === previousLayout[i].width)) return previousLayout;
+    previousLayout = result;
+    return result;
   }
 
   export function header(outline: ScoreProject['outline'], pixelsPerWhole: number) {

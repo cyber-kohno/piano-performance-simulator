@@ -13,6 +13,11 @@ import type { ScoreProject } from "../../domain/score/types.ts";
 export type NormalizedRange = { oldNoteId: string; newNoteId: string };
 /** Single commit boundary shared by every project-changing editor action. */
 namespace EditTransaction {
+  /** Pitch-only actions preserve note IDs, written durations and expression anchors.
+   * They still validate collisions in NotePitches and reconcile affected trills. */
+  export function commitPitches(before: ScoreProject, after: ScoreProject): ScoreProject {
+    return before === after ? before : ScoreTrill.reconcile(before, after);
+  }
   export function commit(before: ScoreProject, after: ScoreProject, normalized?: NormalizedRange): ScoreProject {
     if (before === after) return before;
     const next = ScoreFermata.reconcileCaptured(ScoreFermata.capture(before), after);

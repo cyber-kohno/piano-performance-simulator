@@ -14,6 +14,7 @@ namespace ScoreSlur {
     });
   }
   export function ranges(project: ScoreProject) {
+    if (!project.slurs?.length) return [];
     const notes = notesInScore(project), byId = new Map(notes.map(entry => [entry.note.id, entry]));
     return (project.slurs ?? []).flatMap(slur => {
       const first = byId.get(slur.startNoteId), last = byId.get(slur.endNoteId);

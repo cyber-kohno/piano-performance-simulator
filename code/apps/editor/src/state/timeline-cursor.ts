@@ -123,6 +123,10 @@ export function addNextTimelineVoice(project:ScoreProject,cursor:TimelineCursor)
 
 export function getSelectedTimelineNotes(outline: readonly OutlineBlock[],cursor: TimelineCursor): LocatedTimelineNote[] {
   if(cursor.focusedNoteId===null) return [];
+  if (cursor.selectionAnchorNoteId === null && ScoreTimeline.isPrepared(outline)) {
+    const focused = ScoreTimeline.note(outline, cursor.focusedNoteId, cursor.staff);
+    return focused?.voiceIndex === cursor.voiceIndex ? [focused] : [];
+  }
   const notes=ScoreTimeline.notes(outline,cursor.staff,cursor.voiceIndex);
   const focus=notes.findIndex(({ note }) => note.id===cursor.focusedNoteId);
   if(focus<0) return [];

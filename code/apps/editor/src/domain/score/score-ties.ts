@@ -33,9 +33,8 @@ namespace ScoreTies {
         entry.note.pitches.every((pitch, index) => pitch.midi === next.note.pitches[index].midi &&
           pitch.spellingDirection === next.note.pitches[index].spellingDirection)) valid.add(entry.note.id);
     }
-    const cleanStaff = (staff: PianoStaff): PianoStaff => ({
-      ...staff,
-      voices: staff.voices.map((voice) => ScoreVoice.mapNotes(voice, (element) => {
+    const cleanStaff = (staff: PianoStaff): PianoStaff => {
+      const voices = staff.voices.map((voice) => ScoreVoice.mapNotes(voice, (element) => {
         const keepFrom = element.tieFrom !== undefined && valid.has(element.tieFrom) &&
           entries.get(element.tieFrom)?.note.tieTo === element.id;
         const keepTo = valid.has(element.id);
@@ -44,12 +43,16 @@ namespace ScoreTies {
         if (!keepFrom) delete next.tieFrom;
         if (!keepTo) delete next.tieTo;
         return next;
-      })),
-    });
-    return outline.map((block) => block.type !== 'measure' ? block : {
-      ...block,
-      data: { ...block.data, upperStaff: cleanStaff(block.data.upperStaff), lowerStaff: cleanStaff(block.data.lowerStaff) },
+      }));
+      return voices.every((voice, i) => voice === staff.voices[i]) ? staff : { ...staff, voices };
+    };
+    const result = outline.map(block => {
+      if (block.type !== 'measure') return block;
+      const upperStaff = cleanStaff(block.data.upperStaff), lowerStaff = cleanStaff(block.data.lowerStaff);
+      return upperStaff === block.data.upperStaff && lowerStaff === block.data.lowerStaff ? block
+        : { ...block, data: { ...block.data, upperStaff, lowerStaff } };
     }) as ScoreProject['outline'];
+    return result.every((block, i) => block === outline[i]) ? outline : result;
   }
 
 }
