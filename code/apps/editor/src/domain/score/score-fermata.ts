@@ -1,16 +1,17 @@
-import type { FermataSettings, PianoNote, ScoreProject } from './types.ts';
+import type { FermataSettings, PianoNote, PianoStaff, ScoreProject } from './types.ts';
 import ScoreVoice from './score-voice.ts';
 import MusicalTime from '../theory/musical-time.ts';
 
 namespace ScoreFermata {
   export const defaults: FermataSettings = { lengthRatio: 2 };
   /** Positions use exact score fractions; adjacent ranges do not overlap. */
-  function notes(project: ScoreProject) {
+  function notes(project: ScoreProject, measureIds?: ReadonlySet<string>) {
     let offset = MusicalTime.create(0);
     return project.outline.flatMap(block => {
       if (block.type !== 'measure') return [];
       const measureStart = offset;
       offset = MusicalTime.add(offset, MusicalTime.create(block.data.length.cnt * 16, block.data.length.unit));
+      if (measureIds && !measureIds.has(block.id)) return [];
       return (['upperStaff', 'lowerStaff'] as const).flatMap(staff => block.data[staff].voices.flatMap((voice, voiceIndex) =>
         ScoreVoice.flatten(voice, block.data.length).flatMap(entry => {
           if (entry.element.kind !== 'note') return [];
@@ -27,8 +28,8 @@ namespace ScoreFermata {
     return !!target && entries.some(entry => entry.note.id !== noteId && entry.note.fermata &&
       overlaps(target, entry) && MusicalTime.compare(target.end, entry.end) !== 0);
   }
-  export function hasConflicts(project: ScoreProject): boolean {
-    const entries = notes(project).filter(entry => entry.note.fermata)
+  export function hasConflicts(project: ScoreProject, measureIds?: ReadonlySet<string>): boolean {
+    const entries = notes(project, measureIds).filter(entry => entry.note.fermata)
       .sort((a, b) => MusicalTime.compare(a.start, b.start));
     let active: Entry | undefined;
     for (const entry of entries) {
@@ -57,26 +58,32 @@ namespace ScoreFermata {
     });
   }
 
-  export function capture(project: ScoreProject) {
-    return new Map(notes(project).map(entry => [entry.note.id, { start: entry.start, end: entry.end,
+  export function capture(project: ScoreProject, measureIds?: ReadonlySet<string>) {
+    return new Map(notes(project, measureIds).map(entry => [entry.note.id, { start: entry.start, end: entry.end,
       type: entry.note.value.type, dots: entry.note.value.dots }]));
   }
   /** All notes whose written value or absolute timing changed lose the attachment. */
-  export function reconcileCaptured(previous: ReturnType<typeof capture>, project: ScoreProject, reapplied: ReadonlySet<string> = new Set()): ScoreProject {
-    const removed = new Set(notes(project).filter(entry => {
+  export function reconcileCaptured(previous: ReturnType<typeof capture>, project: ScoreProject, reapplied: ReadonlySet<string> = new Set(), measureIds?: ReadonlySet<string>): ScoreProject {
+    const removed = new Set(notes(project, measureIds).filter(entry => {
       const old = previous.get(entry.note.id);
       return entry.note.fermata && !reapplied.has(entry.note.id) && old && (old.type !== entry.note.value.type || old.dots !== entry.note.value.dots ||
         MusicalTime.compare(old.start, entry.start) !== 0 || MusicalTime.compare(old.end, entry.end) !== 0);
     }).map(entry => entry.note.id));
     if (!removed.size) return project;
-    return { ...project, outline: project.outline.map(block => block.type !== 'measure' ? block : { ...block,
-      data: { ...block.data, ...Object.fromEntries((['upperStaff', 'lowerStaff'] as const).map(staff => [staff, {
-        ...block.data[staff], voices: block.data[staff].voices.map(voice => ScoreVoice.mapNotes(voice, note => {
-          if (!removed.has(note.id)) return note;
-          const { fermata: _, ...rest } = note;
-          return rest;
-        })),
-      }])) } }) as ScoreProject['outline'] };
+    const cleanStaff = (staff: PianoStaff): PianoStaff => {
+      const voices = staff.voices.map(voice => ScoreVoice.mapNotes(voice, note => {
+        if (!removed.has(note.id)) return note;
+        const { fermata: _, ...rest } = note;
+        return rest;
+      }));
+      return voices.every((voice, index) => voice === staff.voices[index]) ? staff : { ...staff, voices };
+    };
+    return { ...project, outline: project.outline.map(block => {
+      if (block.type !== 'measure' || measureIds && !measureIds.has(block.id)) return block;
+      const upperStaff = cleanStaff(block.data.upperStaff), lowerStaff = cleanStaff(block.data.lowerStaff);
+      return upperStaff === block.data.upperStaff && lowerStaff === block.data.lowerStaff ? block
+        : { ...block, data: { ...block.data, upperStaff, lowerStaff } };
+    }) as ScoreProject['outline'] };
   }
   export function canApply(note: Pick<PianoNote, 'tieTo'>): boolean { return !note.tieTo; }
   export function validate(value: unknown): value is FermataSettings {

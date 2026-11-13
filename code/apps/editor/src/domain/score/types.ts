@@ -119,6 +119,8 @@ export type TrillSettings = {
   auxiliary: 'diatonic' | 'half' | 'whole';
   start: 'main' | 'auxiliary';
   attackCount: number;
+  /** One finger per attack, across the complete trill range. No substitutions. */
+  fingerings?: PianoFingering[];
 };
 export type TrillSpan = {
   id: string;

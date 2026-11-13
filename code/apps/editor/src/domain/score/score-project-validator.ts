@@ -132,7 +132,9 @@ namespace ScoreProjectValidator {
     if (value.trills !== undefined && (!Array.isArray(value.trills) || !value.trills.every(item =>
       isRecord(item) && isId(item.id) && item.kind === 'trill' && isId(item.startNoteId) && isId(item.endNoteId) &&
       isRecord(item.settings) && ['diatonic', 'half', 'whole'].includes(String(item.settings.auxiliary)) &&
-      ['main', 'auxiliary'].includes(String(item.settings.start)) && isIntegerIn(item.settings.attackCount, 2, 128)))) return false;
+      ['main', 'auxiliary'].includes(String(item.settings.start)) && isIntegerIn(item.settings.attackCount, 2, 128) &&
+      (item.settings.fingerings === undefined || Array.isArray(item.settings.fingerings) &&
+        item.settings.fingerings.length === item.settings.attackCount && item.settings.fingerings.every(finger => isIntegerIn(finger, 1, 5)))))) return false;
     return true;
   }
 

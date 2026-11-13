@@ -1,9 +1,42 @@
 
 import ScoreVoice from "./score-voice.ts";
+import ScoreTimeline from './score-timeline.ts';
+import ScoreNotes from './score-notes.ts';
 import MusicalTime from "../theory/musical-time.ts";
-import type { ScoreProject, PianoNote, PianoStaff } from './types.ts';
+import type { ScoreProject, PianoNote, PianoStaff, PianoStaffName } from './types.ts';
 
 namespace ScoreTies {
+  /** Moving notes can only invalidate their links and the reciprocal endpoints. */
+  export function reconcileNotes(project: ScoreProject, staff: PianoStaffName, ids: ReadonlySet<string>): ScoreProject {
+    const { outline } = project;
+    if (!ScoreTimeline.isPrepared(outline)) return { ...project, outline: reconcile(outline) };
+    const affected = new Set(ids);
+    for (const id of ids) {
+      const note = ScoreTimeline.note(outline, id, staff)?.note;
+      if (note?.tieFrom) affected.add(note.tieFrom);
+      if (note?.tieTo) affected.add(note.tieTo);
+    }
+    const valid = (fromId: string, toId: string): boolean => {
+      const from = ScoreTimeline.note(outline, fromId, staff), to = ScoreTimeline.note(outline, toId, staff);
+      return !!from && !!to && from.note.tieTo === toId && to.note.tieFrom === fromId &&
+        from.measure.data[staff].voices[from.voiceIndex].id === to.measure.data[staff].voices[to.voiceIndex].id &&
+        MusicalTime.compareNumbers(from.measureStartSixteenths + from.positionSixteenths + from.lengthSixteenths,
+          to.measureStartSixteenths + to.positionSixteenths) === 0 &&
+        from.note.pitches.length === to.note.pitches.length && from.note.pitches.every((pitch, index) =>
+          pitch.midi === to.note.pitches[index].midi && pitch.spellingDirection === to.note.pitches[index].spellingDirection);
+    };
+    const nextProject = ScoreNotes.map(project, affected, note => {
+      const keepFrom = !note.tieFrom || valid(note.tieFrom, note.id);
+      const keepTo = !note.tieTo || valid(note.id, note.tieTo);
+      if (keepFrom && keepTo) return note;
+      const next = { ...note };
+      if (!keepFrom) delete next.tieFrom;
+      if (!keepTo) delete next.tieTo;
+      return next;
+    }, staff);
+    ScoreTimeline.prepare(nextProject.outline);
+    return nextProject;
+  }
   /** Derive tie timing from the voice sequence after outline edits. */
   export function reconcile(outline: ScoreProject['outline']): ScoreProject['outline'] {
     const entries = new Map<string, { note: PianoNote; scope: string; start: number; end: number }>();

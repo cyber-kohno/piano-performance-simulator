@@ -1783,6 +1783,16 @@
                     "type": "integer",
                     "minimum": 2,
                     "maximum": 128
+                  },
+                  "fingerings": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 5
+                    },
+                    "minItems": 2,
+                    "maxItems": 128
                   }
                 },
                 "required": [
@@ -1803,7 +1813,8 @@
           "noteId",
           "settings"
         ],
-        "additionalProperties": false
+        "additionalProperties": false,
+        "description": "Trill over a single-note tie chain. Optional settings.fingerings lists one finger (1–5) per attack in performance order; its length must equal attackCount. No substitutions. Omit fingerings to clear the sequence. Setting a trill clears ordinary pitch fingerings/substitutions across its chain. Use set_trill, not set_fingering, for its principal notes."
       },
       {
         "type": "object",

@@ -1,8 +1,15 @@
 import type { ScoreProject } from './types.ts';
 import MusicalTime from '../theory/musical-time.ts';
 import ScoreVoice from './score-voice.ts';
+import ScoreTimeline from './score-timeline.ts';
 
 namespace ScoreTempo {
+  export function anchor(project: ScoreProject, noteId: string) {
+    if (!ScoreTimeline.isPrepared(project.outline)) return anchors(project).find(anchor => anchor.noteId === noteId);
+    const entry = ScoreTimeline.note(project.outline, noteId, 'upperStaff');
+    return entry?.voiceIndex === 0 ? { noteId, position: MusicalTime.addNumbers(entry.measureStartSixteenths, entry.positionSixteenths),
+      measureId: entry.measure.id, localPosition: entry.positionSixteenths } : undefined;
+  }
   export function anchors(project: ScoreProject) {
     let start = 0;
     return project.outline.flatMap(block => {
@@ -17,9 +24,9 @@ namespace ScoreTempo {
   }
   export function changes(project: ScoreProject) {
     if (!project.tempoChanges?.length) return [];
-    const anchors = new Map(ScoreTempo.anchors(project).map(anchor => [anchor.noteId, anchor]));
+    const anchors = ScoreTimeline.isPrepared(project.outline) ? undefined : new Map(ScoreTempo.anchors(project).map(anchor => [anchor.noteId, anchor]));
     return (project.tempoChanges ?? []).flatMap(change => {
-      const anchor = anchors.get(change.noteId);
+      const anchor = anchors ? anchors.get(change.noteId) : ScoreTempo.anchor(project, change.noteId);
       return anchor && Number.isInteger(change.bpm) && change.bpm >= 10 && change.bpm <= 400 ? [{ ...anchor, bpm: change.bpm }] : [];
     }).sort((a, b) => MusicalTime.compareNumbers(a.position, b.position));
   }

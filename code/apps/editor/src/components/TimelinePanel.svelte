@@ -8,6 +8,8 @@
   import ScoreVoice from '../domain/score/score-voice.ts';
   import WrittenValue from "../domain/theory/written-value.ts";
   import TimelineView from '../state/timeline-view.ts';
+  import TimelineHeader from '../state/timeline-header.ts';
+  import TimelineEventRow from './TimelineEventRow.svelte';
   import ScoreKey from "../domain/score/score-key.ts";
 
   import { getFocusedGrace, getGraceRollLayout } from '../state/grace-input';
@@ -50,6 +52,7 @@
     playbackActive?: boolean;
   } = $props();
   const trillNotes=$derived(new Map(trills.flatMap(span=>ScoreTrill.chain({outline},span.startNoteId).map((note,index)=>[note.id,index===0] as const))));
+  const trillFingerings=$derived(new Map(trills.filter(span=>span.settings.fingerings).map(span=>[span.startNoteId,span.settings.fingerings!.join('')])));
 
   let measureRow = $state<HTMLDivElement>();
   let pianoRollViewport = $state<HTMLElement>();
@@ -215,6 +218,8 @@
     return null;
   });
   const headerMeasures = $derived(TimelineView.layout(outline, pixelsPerWhole));
+  const buildTimelineHeader = TimelineHeader.create();
+  const timelineHeader = $derived(buildTimelineHeader({ outline, tempoChanges }));
   const totalTimelineWidth = $derived(headerMeasures.length
     ? headerMeasures.at(-1)!.start + headerMeasures.at(-1)!.width : 0);
   // Playback and keyboard navigation update this only when their measure changes.
@@ -349,8 +354,9 @@
 <section class="timeline" class:pedal-mode={pedalMode || ottavaMode} class:expression-modal-open={expressionModalOpen} aria-label="Timeline panel">
   <div class="corner" aria-hidden="true"></div>
   <section class="time-header" aria-label="Time header">
-    <div class="event-row" aria-label="Event row"></div>
     <div class="measure-row" aria-label="Measure row" bind:this={measureRow}>
+      <TimelineEventRow data={timelineHeader} start={visibleTimelineStart} end={visibleTimelineEnd}
+        width={totalTimelineWidth} {pixelsPerSixteenth} />
       <div class="measure-row-spacer" style={`width: ${totalTimelineWidth}px`}></div>
       {#each visibleMeasures as item (item.measure.id)}
         {@const measure = item.measure}
@@ -518,10 +524,10 @@
                 aria-current={mode === 'timeline' && !pedalMode && !ottavaMode && !focusedGrace && entry.staff === timelineCursor.staff && timelineCursor.focusedNoteId === note.id && timelineCursor.focusedPitchIndex === pitchIndex ? 'true' : undefined}
                 style={`left: ${entry.position * pixelsPerSixteenth}px; top: ${pitchTopMargin + (108 - pitch.midi) * pitchRowHeight}px; width: ${entry.displayLength * pixelsPerSixteenth}px; --active-note-height: ${activeNoteHeight}px`}
               >{#if note.staccato && pitchIndex === 0}<span class="staccato-mark" aria-label={note.staccato.type === 'normal' ? 'Staccato' : 'Staccatissimo'}>{note.staccato.type === 'normal' ? '•' : '▾'}</span>{/if}{#if note.accent && pitchIndex === 0}<span class="accent-mark" aria-label="Accent">&gt;</span>{/if}{#if note.fermata && pitchIndex === 0}<span class="fermata-mark" style:top={note.staccato || note.accent ? "-36px" : "-22px"} aria-label="Fermata">𝄐</span>{/if}</div>
-              {#if pitch.fingering !== undefined}
+              {#if trillFingerings.has(note.id) || !trillNotes.has(note.id) && pitch.fingering !== undefined}
                 <span class="fingering-badge" aria-hidden="true"
                   style={`left: ${entry.position * pixelsPerSixteenth - 2}px; top: ${pitchTopMargin + (108 - pitch.midi) * pitchRowHeight + (pitchInactive ? pitchRowHeight * 0.75 : (pitchRowHeight + activeNoteHeight) / 2) + 12}px; transform: translateY(-100%)`}
-                >{pitch.fingering}{pitch.substitutionFingering === undefined ? '' : `-${pitch.substitutionFingering}`}</span>
+                >{trillFingerings.get(note.id) ?? `${pitch.fingering}${pitch.substitutionFingering === undefined ? '' : `-${pitch.substitutionFingering}`}`}</span>
               {/if}
             {/each}
             {#if note.arpeggio && note.pitches.length >= 2}
@@ -727,15 +733,9 @@
   }
 
   .time-header {
-    display: grid;
-    grid-template-rows: 50px 40px;
     min-width: 0;
     overflow: hidden;
     container-type: inline-size;
-  }
-
-  .event-row {
-    background: #93bbc1;
   }
 
   .measure-row {
@@ -744,6 +744,7 @@
     min-width: 0;
     overflow: hidden;
     background: #b6dfdb;
+    height: 90px;
   }
 
   .measure-row::after {
@@ -755,7 +756,7 @@
 
   .measure-header-block {
     position: absolute;
-    top: 0;
+    top: 50px;
     flex: 0 0 auto;
     height: 40px;
   }

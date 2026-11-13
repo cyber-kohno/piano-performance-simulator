@@ -1,5 +1,6 @@
 
 import ScoreVoice from "./score-voice.ts";
+import MusicalTime from '../theory/musical-time.ts';
 import type { OutlineBlock, PianoStaffName, PianoNote, PianoTuplet, MeasureBlock } from './types.ts';
 
 export type LocatedTimelineNote = {
@@ -119,6 +120,28 @@ namespace ScoreTimeline {
     const count = Math.max(0, ...outline.map((block) => block.type === 'measure' ? block.data[staff].voices.length : 0));
     return Array.from({ length: count }, (_, index) => notes(outline, staff, index)).flat();
   }
+  /** Voice sequences are time ordered and non-overlapping. Search the cached
+   * sequence before doing exact checks on notes in the edited interval. */
+  export function notesInRange(outline: readonly OutlineBlock[], staff: PianoStaffName, voiceIndex: number,
+    start: number, end: number): LocatedTimelineNote[] {
+    if (MusicalTime.compareNumbers(start, end) >= 0) return [];
+    const entries = notes(outline, staff, voiceIndex);
+    let low = 0, high = entries.length;
+    while (low < high) {
+      const middle = (low + high) >>> 1, entry = entries[middle];
+      const stop = MusicalTime.addNumbers(MusicalTime.addNumbers(entry.measureStartSixteenths, entry.positionSixteenths), entry.lengthSixteenths);
+      if (MusicalTime.compareNumbers(stop, start) <= 0) low = middle + 1;
+      else high = middle;
+    }
+    const first = low;
+    high = entries.length;
+    while (low < high) {
+      const middle = (low + high) >>> 1, entry = entries[middle];
+      if (MusicalTime.compareNumbers(MusicalTime.addNumbers(entry.measureStartSixteenths, entry.positionSixteenths), end) < 0) low = middle + 1;
+      else high = middle;
+    }
+    return entries.slice(first, low);
+  }
   export function note(outline: readonly OutlineBlock[], noteId: string, staff: PianoStaffName = 'upperStaff') {
     if (immutable.has(outline)) {
       let byId = idCache.get(outline);
@@ -139,12 +162,15 @@ namespace ScoreTimeline {
     if (!selected) return [];
     if (!selected.note.tieFrom && !selected.note.tieTo) return [selected];
     const voiceIndex = selected.voiceIndex;
-    const byId = new Map(notes(outline, staff, voiceIndex).map((entry) => [entry.note.id, entry]));
-    let head = byId.get(noteId);
-    if (!head) return [];
+    const byId = immutable.has(outline) ? undefined : new Map(notes(outline, staff, voiceIndex).map((entry) => [entry.note.id, entry]));
+    const lookup = (id: string) => {
+      const entry = byId ? byId.get(id) : note(outline, id, staff);
+      return entry?.voiceIndex === voiceIndex ? entry : undefined;
+    };
+    let head = selected;
     const visited = new Set([head.note.id]);
     while (head.note.tieFrom) {
-      const previous = byId.get(head.note.tieFrom);
+      const previous = lookup(head.note.tieFrom);
       if (!previous || previous.note.tieTo !== head.note.id || visited.has(previous.note.id)) break;
       visited.add(previous.note.id);
       head = previous;
@@ -155,7 +181,7 @@ namespace ScoreTimeline {
     while (current && !visited.has(current.note.id)) {
       result.push(current);
       visited.add(current.note.id);
-      const next: LocatedTimelineNote | undefined = current.note.tieTo ? byId.get(current.note.tieTo) : undefined;
+      const next: LocatedTimelineNote | undefined = current.note.tieTo ? lookup(current.note.tieTo) : undefined;
       current = next?.note.tieFrom === current.note.id ? next : undefined;
     }
     return result;

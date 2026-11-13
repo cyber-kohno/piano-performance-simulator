@@ -78,6 +78,8 @@ namespace ScoreIntegrity {
     for (const trill of project.trills ?? []) {
       add(trill.id);
       const chain = ScoreTrill.chain(project, trill.startNoteId);
+      if (trill.settings.fingerings && chain.some(note => note.pitches.some(pitch => pitch.fingering !== undefined || pitch.substitutionFingering !== undefined)))
+        fail(`Trill fingerings belong to its attack sequence, without pitch fingerings or substitutions: ${trill.id}.`);
       if (!ScoreTrill.validate(trill.settings) || !ScoreTrill.canApply(project, trill.startNoteId) || chain[0]?.id !== trill.startNoteId ||
         chain.at(-1)?.id !== trill.endNoteId || trillTargets.has(trill.startNoteId)) fail(`Invalid trill reference or settings: ${trill.id}.`);
       trillTargets.add(trill.startNoteId);

@@ -32,9 +32,10 @@ export type NoteSettings = Pick<PianoNote, 'staccato' | 'accent' | 'fermata' | '
 };
 /** Application actions. Legacy pure editing algorithms remain in state until stage 2. */
 namespace NoteEditor {
-  function finish(before: ScoreProject, result: NoteEditResult | undefined, normalized?: NormalizedRange) {
+  function finish(before: ScoreProject, result: NoteEditResult | undefined, normalized?: NormalizedRange,
+    commit: typeof EditTransaction.commit = EditTransaction.commit) {
     if (!result) return undefined;
-    const project = EditTransaction.commit(before, result.project, normalized);
+    const project = commit(before, result.project, normalized);
     return project === before && result.project !== before ? undefined : { ...result, project };
   }
   function normalizeResult(before: ScoreProject, cursor: Timeline.TimelineCursor, result: NoteEditResult | undefined) {
@@ -48,7 +49,7 @@ namespace NoteEditor {
     return finish(project, Timeline.deleteFocusedTimelineNote(project, cursor, pitchOnly));
   }
   export function move(project: ScoreProject, cursor: Timeline.TimelineCursor, direction: -1 | 1) {
-    return finish(project, Timeline.moveFocusedTimelineNote(project, cursor, direction));
+    return finish(project, Timeline.moveFocusedTimelineNote(project, cursor, direction), undefined, EditTransaction.commitTime);
   }
   export function transpose(project: ScoreProject, cursor: Timeline.TimelineCursor, direction: -1 | 1, octave = false) {
     const selected = Timeline.getSelectedTimelineNotes(project.outline,cursor);
@@ -77,14 +78,17 @@ namespace NoteEditor {
     }, fingering, substitutionFingering);
     return next === project ? project : EditTransaction.commit(project, next);
   }
+  export function setTrillFingerings(project: ScoreProject, noteId: string, fingerings?: PianoFingering[]): ScoreProject {
+    return EditTransaction.commitPitches(project, ScoreTrill.setFingerings(project, noteId, fingerings));
+  }
   export function setValue(project: ScoreProject, cursor: Timeline.TimelineCursor, value: NoteValue) {
-    return finish(project, Timeline.setFocusedTimelineNoteValue(project, cursor, value));
+    return finish(project, Timeline.setFocusedTimelineNoteValue(project, cursor, value), undefined, EditTransaction.commitTime);
   }
   export function toggleDot(project: ScoreProject, cursor: Timeline.TimelineCursor) {
-    return finish(project, Timeline.toggleFocusedTimelineNoteDot(project, cursor));
+    return finish(project, Timeline.toggleFocusedTimelineNoteDot(project, cursor), undefined, EditTransaction.commitTime);
   }
   export function resize(project: ScoreProject, cursor: Timeline.TimelineCursor, direction: -1 | 1) {
-    return finish(project, Timeline.resizeFocusedTimelineNote(project, cursor, direction));
+    return finish(project, Timeline.resizeFocusedTimelineNote(project, cursor, direction), undefined, EditTransaction.commitTime);
   }
   export function resizeTie(project: ScoreProject, cursor: Timeline.TimelineCursor, direction: -1 | 1) {
     return normalizeResult(project, cursor, Timeline.resizeFocusedTimelineTie(project, cursor, direction));

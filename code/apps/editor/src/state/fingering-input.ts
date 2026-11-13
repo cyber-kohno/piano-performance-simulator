@@ -2,6 +2,12 @@ import ScoreFingerings, { type FingeringRules } from '../domain/score/score-fing
 import type { PianoFingering } from '../domain/score/types.ts';
 
 namespace FingeringInput {
+  /** Empty input removes the optional sequence; undefined denotes invalid input. */
+  export function parseTrill(value: string, attackCount: number): PianoFingering[] | null | undefined {
+    if(value === '') return null;
+    if(!Number.isInteger(attackCount)||attackCount<2||attackCount>128||value.length!==attackCount||!/^[1-5]+$/.test(value)) return undefined;
+    return [...value].map(digit=>Number(digit) as PianoFingering);
+  }
   export function parse(value: string, rules: FingeringRules): {
     fingering: PianoFingering; substitutionFingering?: PianoFingering;
   } | undefined {

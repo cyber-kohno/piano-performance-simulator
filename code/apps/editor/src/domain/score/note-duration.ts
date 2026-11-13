@@ -49,13 +49,14 @@ namespace NoteDuration {
     const affectedIds=new Set(suffix.map(({ note }) => note.id));
     const end=Math.max(oldEnd,nextStart);
     if(NoteSpan.hasTuplet(project.outline,target,start,end)) return undefined;
-    if(ScoreTimeline.notes(project.outline,target.staff,target.voiceIndex).some((entry) => {
+    if(ScoreTimeline.notesInRange(project.outline,target.staff,target.voiceIndex,start,end).some((entry) => {
       if(affectedIds.has(entry.note.id)) return false;
       const onset=entry.measureStartSixteenths+entry.positionSixteenths;
       return onset<end&&onset+entry.lengthSixteenths>start;
     })) return undefined;
 
     const nextProject=NoteSpan.rewrite(project,start,end,plans,target.staff,target.voiceIndex);
+    if(ScoreTimeline.isPrepared(project.outline)) ScoreTimeline.prepare(nextProject.outline);
     if(ScoreNotes.collides(project.outline,nextProject.outline,target.staff,affectedIds)) return undefined;
     return {
       project: nextProject,
@@ -116,7 +117,7 @@ namespace NoteDuration {
       expected+=length;
     }
     const ids=new Set(chain.map(({ note }) => note.id));
-    if(ScoreTimeline.notes(project.outline,target.staff,target.voiceIndex).some((entry) => {
+    if(ScoreTimeline.notesInRange(project.outline,target.staff,target.voiceIndex,start,newEnd).some((entry) => {
       const onset=entry.measureStartSixteenths+entry.positionSixteenths;
       return !ids.has(entry.note.id)&&onset<newEnd&&onset+entry.lengthSixteenths>start;
     })) return undefined;
@@ -184,6 +185,7 @@ namespace NoteDuration {
     const pitchIndex=target.pitchIndex!==null&&tail.note.pitches[target.pitchIndex]
       ? target.pitchIndex:0;
     const nextProject=NoteSpan.rewrite(project,start,Math.max(oldEnd,newEnd),plans,target.staff,target.voiceIndex);
+    if(ScoreTimeline.isPrepared(project.outline)) ScoreTimeline.prepare(nextProject.outline);
     if(ScoreNotes.collides(project.outline,nextProject.outline,target.staff,new Set(plans.map(({ note }) => note.id)))) return undefined;
     return {
       project: nextProject,

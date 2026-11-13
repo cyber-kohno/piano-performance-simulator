@@ -1,6 +1,7 @@
 import type { ScoreProject } from './types.ts';
 import MusicalTime from '../theory/musical-time.ts';
 import ScoreVoice from './score-voice.ts';
+import ScoreTimeline from './score-timeline.ts';
 
 namespace ScoreSlur {
   function notesInScore(project: ScoreProject) {
@@ -52,7 +53,16 @@ namespace ScoreSlur {
   /** Endpoints are references, so ordinary moves follow automatically; deleted endpoints remove the span. */
   export function reconcile(project: ScoreProject): ScoreProject {
     if (!project.slurs) return project;
-    const valid = new Set(ScoreSlur.ranges(project).map(slur => slur.id));
+    const valid = ScoreTimeline.isPrepared(project.outline) ? new Set(project.slurs.filter(slur => {
+      for (const staff of ['upperStaff', 'lowerStaff'] as const) {
+        const first = ScoreTimeline.note(project.outline, slur.startNoteId, staff);
+        const last = ScoreTimeline.note(project.outline, slur.endNoteId, staff);
+        if (first && last && first.voiceIndex === last.voiceIndex && MusicalTime.compareNumbers(
+          MusicalTime.addNumbers(first.measureStartSixteenths, first.positionSixteenths),
+          MusicalTime.addNumbers(last.measureStartSixteenths, last.positionSixteenths)) < 0) return true;
+      }
+      return false;
+    }).map(slur => slur.id)) : new Set(ScoreSlur.ranges(project).map(slur => slur.id));
     return { ...project, slurs: project.slurs.filter(slur => valid.has(slur.id)) };
   }
 }

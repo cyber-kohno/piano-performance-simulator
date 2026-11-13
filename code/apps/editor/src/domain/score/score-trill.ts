@@ -1,11 +1,15 @@
-import type { ScoreProject, PianoNote, PianoStaffName, TrillSettings, TrillSpan, KeySignature } from './types.ts';
+import type { ScoreProject, PianoNote, PianoStaffName, TrillSettings, TrillSpan, PianoFingering } from './types.ts';
 import ScoreVoice from './score-voice.ts';
+import ScoreTimeline from './score-timeline.ts';
+import ScoreNotes from './score-notes.ts';
 
 namespace ScoreTrill {
   export const defaults: TrillSettings = { auxiliary:'diatonic', start:'main', attackCount:8 };
   export function validate(settings: TrillSettings): boolean {
     return ['diatonic','half','whole'].includes(settings.auxiliary) && ['main','auxiliary'].includes(settings.start) &&
-      Number.isInteger(settings.attackCount) && settings.attackCount >= 2 && settings.attackCount <= 128;
+      Number.isInteger(settings.attackCount) && settings.attackCount >= 2 && settings.attackCount <= 128 &&
+      (settings.fingerings === undefined || Array.isArray(settings.fingerings) && settings.fingerings.length === settings.attackCount &&
+        Array.from(settings.fingerings).every(finger => Number.isInteger(finger) && finger >= 1 && finger <= 5));
   }
   export function notes(project: ScoreProject) {
     return project.outline.flatMap(block => block.type !== 'measure' ? [] :
@@ -15,13 +19,22 @@ namespace ScoreTrill {
   }
   /** Scope references by IDs; never store onset or duration in a range expression. */
   export function chain(project: ScoreProject, noteId: string): PianoNote[] {
-    const notes=ScoreTrill.notes(project), selected=notes.find(entry=>entry.note.id===noteId);
+    const prepared=ScoreTimeline.isPrepared(project.outline);
+    const notes=prepared ? [] : ScoreTrill.notes(project);
+    const upper=prepared ? ScoreTimeline.note(project.outline,noteId,'upperStaff') : undefined;
+    const lower=prepared && !upper ? ScoreTimeline.note(project.outline,noteId,'lowerStaff') : undefined;
+    const selected=upper ? {...upper,staff:'upperStaff' as const} : lower ? {...lower,staff:'lowerStaff' as const} : notes.find(entry=>entry.note.id===noteId);
     if (!selected) return [];
     const byId=new Map(notes.filter(entry=>entry.staff===selected.staff && entry.voiceIndex===selected.voiceIndex).map(entry=>[entry.note.id,entry.note]));
+    const lookup=(id:string) => {
+      if(!prepared) return byId.get(id);
+      const entry=ScoreTimeline.note(project.outline,id,selected.staff);
+      return entry?.voiceIndex===selected.voiceIndex ? entry.note : undefined;
+    };
     let head=selected.note; const seen=new Set<string>();
     while(head.tieFrom) {
       if(seen.has(head.id)) return [];
-      seen.add(head.id); const previous=byId.get(head.tieFrom);
+      seen.add(head.id); const previous=lookup(head.tieFrom);
       if(!previous || previous.tieTo!==head.id) return [];
       head=previous;
     }
@@ -30,7 +43,7 @@ namespace ScoreTrill {
       if(seen.has(note.id)) return [];
       seen.add(note.id);result.push(note);
       if(!note.tieTo) break;
-      const next=byId.get(note.tieTo);
+      const next=lookup(note.tieTo);
       if(!next || next.tieFrom!==note.id) return [];
       note=next;
     }
@@ -49,9 +62,23 @@ namespace ScoreTrill {
     const existing=ScoreTrill.forNote(project,noteId), chain=ScoreTrill.chain(project,noteId);
     if(!chain.length) return project;
     const trills=(project.trills ?? []).filter(span=>span.id!==existing?.id);
-    if(settings) trills.push({id:existing?.id ?? `trill-${crypto.randomUUID()}`,kind:'trill',startNoteId:chain[0].id,endNoteId:chain.at(-1)!.id,settings:{...settings}});
+    if(settings) trills.push({id:existing?.id ?? `trill-${crypto.randomUUID()}`,kind:'trill',startNoteId:chain[0].id,endNoteId:chain.at(-1)!.id,
+      settings:{...settings,...(settings.fingerings ? {fingerings:[...settings.fingerings]} : {})}});
+    // A trill owns the entire attack sequence. Ordinary pitch fingerings and
+    // substitutions must not compete with it, even when no sequence is entered.
+    const clearIds=new Set(settings ? chain.filter(note=>note.pitches.some(pitch=>pitch.fingering!==undefined||pitch.substitutionFingering!==undefined)).map(note=>note.id) : []);
+    if(clearIds.size) for(const staff of ['upperStaff','lowerStaff'] as const)
+      project=ScoreNotes.map(project,clearIds,note=> ({...note,pitches:note.pitches.map(({fingering:_,substitutionFingering:__,...pitch})=>pitch)}),staff);
     const {trills:_,...rest}=project;
     return trills.length ? {...rest,trills} : rest;
+  }
+  export function setFingerings(project: ScoreProject, noteId: string, fingerings?: PianoFingering[]): ScoreProject {
+    const trill=forNote(project,noteId);
+    if(!trill) return project;
+    if(fingerings===undefined ? trill.settings.fingerings===undefined : Array.isArray(fingerings) &&
+      fingerings.length===trill.settings.fingerings?.length && fingerings.every((finger,index)=>finger===trill.settings.fingerings![index])) return project;
+    const {fingerings:_,...settings}=trill.settings;
+    return set(project,noteId,{...settings,...(fingerings ? {fingerings} : {})});
   }
   /** One transaction boundary for all editor commands. Only explicit normalization may remap membership. */
   export function reconcile(before: ScoreProject, after: ScoreProject,

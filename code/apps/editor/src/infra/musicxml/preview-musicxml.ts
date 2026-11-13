@@ -107,6 +107,7 @@ namespace PreviewMusicXml {
     const beatLength = beat.cnt / beat.unit * 16;
     const tempoDirection = (bpm: number, offset: number) => `<direction placement="above"><direction-type><metronome><beat-unit>${beat.unit === 8 ? beat.cnt === 3 ? 'quarter' : 'eighth' : 'quarter'}</beat-unit>${beat.cnt === 3 ? '<beat-unit-dot/>' : ''}<per-minute>${bpm}</per-minute></metronome></direction-type><offset sound="yes">${Math.round(offset * ticksPerSixteenth)}</offset><staff>1</staff><sound tempo="${bpm * beatLength / 4}"/></direction>`;
     const trillByNote = new Map<string, string>();
+    const trillFingerings = new Map<string, string>();
     for (const span of trills) {
       const chain = ScoreTrill.chain({ outline }, span.startNoteId);
       if (chain.at(-1)?.id !== span.endNoteId || !chain.every(note => note.pitches.length === 1)) continue;
@@ -124,6 +125,7 @@ namespace PreviewMusicXml {
           (stop ? '<wavy-line type="stop" number="1"/>' : '') +
           (start && accidental ? '<accidental-mark placement="above">' + accidental + '</accidental-mark>' : '');
         trillByNote.set(note.id, ornament);
+        if (start && span.settings.fingerings) trillFingerings.set(note.id, span.settings.fingerings.join(''));
       });
     }
     const noteResolution = visible.reduce((resolution, measure) => [measure.data.upperStaff, measure.data.lowerStaff].reduce((staffResolution, staff) =>
@@ -268,7 +270,9 @@ namespace PreviewMusicXml {
               (pitchIndex === 0 && element.fermata ? '<fermata type="upright"/>' : '') +
               (pitchIndex === 0 && (element.staccato || element.accent) ? `<articulations>${element.accent ? '<accent/>' : ''}${element.staccato ? `<${element.staccato.type === 'normal' ? 'staccato' : 'staccatissimo'}/>` : ''}</articulations>` : '') +
               (element.arpeggio ? `<arpeggiate number="${voiceNumber}"${element.arpeggio.type === 'down' ? ' direction="down"' : ''}/>` : '') +
-              fingeringXml(pitch);
+              (trillByNote.has(element.id)
+                ? pitchIndex === 0 && trillFingerings.has(element.id) ? `<technical><fingering>${trillFingerings.get(element.id)}</fingering></technical>` : ''
+                : fingeringXml(pitch));
             body += `<note>${pitchIndex ? '<chord/>' : ''}${pitchXml(pitch, measureKey)}<duration>${duration}</duration>${ties}<voice>${voiceNumber}</voice>${written}${modification}` +
               (staff.voices.length > 1 ? `<stem>${voiceIndex % 2 === 0 ? 'up' : 'down'}</stem>` : '') +
               `<staff>${staffIndex + 1}</staff>${notations ? `<notations>${notations}</notations>` : ''}</note>`;

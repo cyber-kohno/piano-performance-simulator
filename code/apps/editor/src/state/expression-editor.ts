@@ -4,9 +4,9 @@ import ScoreFermata from '../domain/score/score-fermata.ts';
 
 import ScoreTrill from "../domain/score/score-trill.ts";
 import GraceNotePerformance from "../domain/performance/grace-note-performance.ts";
-import type { AccentSettings, FermataSettings, ArpeggioSettings, GracePerformanceSettings, PianoNote, ScoreProject, StaccatoSettings, TrillSettings } from "../domain/score/types.ts";
+import type { AccentSettings, FermataSettings, ArpeggioSettings, GracePerformanceSettings, PianoNote, PianoFingering, ScoreProject, StaccatoSettings, TrillSettings } from "../domain/score/types.ts";
 
-type FieldValue = string | number | boolean;
+type FieldValue = string | number | boolean | PianoFingering[];
 export type ExpressionValues = Record<string, FieldValue>;
 export type ExpressionDraft = Record<string, ExpressionValues | undefined>;
 export type ExpressionEditor = { draft: ExpressionDraft; detail: string | null; row: number; error?: string };
@@ -76,6 +76,11 @@ export const expressionDefinitions: ExpressionDefinition[] = [{
   available:note=>note.pitches.length===1,
   unavailableReason:()=> 'Unavailable: Trill requires a single pitch throughout the tie chain.',
   create:()=>({...ScoreTrill.defaults}),
+  afterChange:(values,fieldId)=> {
+    if(fieldId!=='attackCount') return values;
+    const {fingerings:_,...rest}=values;
+    return rest;
+  },
   fields:[
     {id:'auxiliary',label:'Auxiliary note',kind:'choice',choices:[{value:'diatonic',label:'Follow key signature'},{value:'half',label:'Semitone above'},{value:'whole',label:'Whole tone above'}]},
     {id:'start',label:'Start note',kind:'choice',choices:[{value:'main',label:'Main'},{value:'auxiliary',label:'Auxiliary'}]},
@@ -88,7 +93,7 @@ export function createExpressionEditor(note: PianoNote, trill?: TrillSettings): 
     ...(note.fermata ? {fermata:{...note.fermata}} : {}),
     ...(note.arpeggio ? {arpeggio:{...note.arpeggio}} : {}),
     ...(note.gracePerformance ? {grace:{...note.gracePerformance}} : {}),
-    ...(trill ? {trill:{...trill}} : {}) }, detail: null, row: 0 };
+    ...(trill ? {trill:{...trill,...(trill.fingerings ? {fingerings:[...trill.fingerings]} : {})}} : {}) }, detail: null, row: 0 };
 }
 export function getExpressionRows(editor: ExpressionEditor, note: PianoNote, project?: ScoreProject) {
   const definition = expressionDefinitions.find(item => item.id === editor.detail);
@@ -190,5 +195,6 @@ function validateGracePerformance(value: GracePerformanceSettings): boolean {
 }
 export function trillFromDraft(editor: ExpressionEditor): TrillSettings | undefined {
   const value=editor.draft.trill;
-  return value ? {auxiliary:value.auxiliary as TrillSettings['auxiliary'],start:value.start as TrillSettings['start'],attackCount:value.attackCount as number} : undefined;
+  return value ? {auxiliary:value.auxiliary as TrillSettings['auxiliary'],start:value.start as TrillSettings['start'],attackCount:value.attackCount as number,
+    ...(value.fingerings!==undefined ? {fingerings:(Array.isArray(value.fingerings) ? [...value.fingerings] : value.fingerings) as PianoFingering[]} : {})} : undefined;
 }

@@ -10,9 +10,17 @@
     onCancel: () => void;
   } = $props();
 
-  let frame: HTMLDivElement;
+  let frame = $state<HTMLDivElement>();
+  let caret = $state<HTMLSpanElement>();
   const hasError = $derived(accept ? !accept(draft.value.trim()) : draft.value.trim().length === 0);
   let position = $state({ left: 0, top: 0, width: 120 });
+  $effect(() => {
+    draft.value; draft.cursor;
+    if (!frame || !caret) return;
+    const left = caret.offsetLeft, right = left + caret.offsetWidth;
+    if (left < frame.scrollLeft + 6) frame.scrollLeft = Math.max(0, left - 6);
+    else if (right > frame.scrollLeft + frame.clientWidth - 6) frame.scrollLeft = right - frame.clientWidth + 6;
+  });
 
   function updatePosition() {
     if (!anchor.isConnected) return;
@@ -29,12 +37,12 @@
 
   onMount(() => {
     updatePosition();
-    frame.focus();
+    frame?.focus();
     const outside = (event: PointerEvent) => {
-      if (event.target instanceof Node && !frame.contains(event.target)) onCancel();
+      if (frame && event.target instanceof Node && !frame.contains(event.target)) onCancel();
     };
     const observer = new ResizeObserver(updatePosition);
-    observer.observe(frame);
+    if (frame) observer.observe(frame);
     window.addEventListener('resize', updatePosition);
     window.addEventListener('scroll', updatePosition, true);
     window.addEventListener('pointerdown', outside, true);
@@ -50,7 +58,7 @@
 <div bind:this={frame} class="frame" class:error={hasError} role="group" aria-label={label}
   tabindex="-1"
   style:left={`${position.left}px`} style:top={`${position.top}px`} style:min-width={`${position.width}px`}>
-  <span>{draft.value.slice(0, draft.cursor)}</span><span class="cursor" aria-hidden="true"></span><span>{draft.value.slice(draft.cursor)}</span>
+  <span>{draft.value.slice(0, draft.cursor)}</span><span bind:this={caret} class="cursor" aria-hidden="true"></span><span>{draft.value.slice(draft.cursor)}</span>
 </div>
 
 <style>
@@ -61,6 +69,7 @@
     min-height: 24px;
     max-width: calc(100vw - 16px);
     overflow-x: auto;
+    scrollbar-width: none;
     padding: 3px 6px;
     border: solid 1px #ffffffa8;
     border-radius: 3px;
@@ -76,6 +85,7 @@
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.55);
   }
   .frame.error { border-color: #ff8f8f; background-color: #2a0505; }
+  .frame::-webkit-scrollbar { display: none; }
   .cursor {
     display: inline-block;
     width: 1px;

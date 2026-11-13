@@ -176,6 +176,7 @@ namespace ScoreEditing {
           ids.push(target.item.id);
         } else if (type === 'set_fingering') {
           const target = note(op.noteId);
+          if (op.graceNoteId === undefined && ScoreTrill.forNote(candidate,target.item.id)) fail('Use set_trill settings.fingerings for a trill; substitutions are not allowed.');
           const grace = op.graceNoteId === undefined ? undefined : target.item.beforeGraceNotes?.find(child => child.id === op.graceNoteId);
           if (op.graceNoteId !== undefined && !grace) fail('Grace note not found.', 'TARGET_NOT_FOUND');
           const pitch = (grace?.pitches ?? target.item.pitches)[op.pitchIndex as number];
@@ -215,6 +216,7 @@ namespace ScoreEditing {
           if (!candidate.slurs?.some(span => span.id === op.slurId)) fail('Slur not found.', 'TARGET_NOT_FOUND');
           candidate.slurs = candidate.slurs!.filter(span => span.id !== op.slurId); ids.push(op.slurId as string);
         } else if (type === 'set_trill') {
+          if (op.settings !== null && !ScoreTrill.validate(op.settings as TrillSettings)) fail('Invalid trill settings: fingerings must contain exactly attackCount digits from 1 to 5.');
           note(op.noteId);
           if (!ScoreTrill.canApply(candidate, op.noteId as string)) fail('A trill requires a single note or a same-pitch tie chain.');
           candidate = ScoreTrill.set(candidate, op.noteId as string, op.settings === null ? undefined : op.settings as TrillSettings);

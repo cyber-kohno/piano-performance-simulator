@@ -1,8 +1,17 @@
 import type { ScoreProject, PianoStaffName } from './types.ts';
 import MusicalTime from '../theory/musical-time.ts';
 import ScoreVoice from './score-voice.ts';
+import ScoreTimeline from './score-timeline.ts';
 export type Clef = 'treble' | 'bass';
 namespace ScoreClef {
+  function anchor(project: ScoreProject, noteId: string) {
+    for (const staff of ['upperStaff', 'lowerStaff'] as const) {
+      const entry = ScoreTimeline.note(project.outline, noteId, staff);
+      if (entry?.voiceIndex === 0) return { noteId, position: MusicalTime.addNumbers(entry.measureStartSixteenths, entry.positionSixteenths),
+        measureId: entry.measure.id, localPosition: entry.positionSixteenths, staff };
+    }
+    return undefined;
+  }
   export function anchors(project: ScoreProject) {
     let start = 0;
     return project.outline.flatMap(block => {
@@ -19,10 +28,10 @@ namespace ScoreClef {
   }
   export function changes(project: ScoreProject) {
     if (!project.clefChanges?.length) return [];
-    const anchors = new Map(ScoreClef.anchors(project).map(anchor => [anchor.noteId, anchor]));
+    const anchors = ScoreTimeline.isPrepared(project.outline) ? undefined : new Map(ScoreClef.anchors(project).map(anchor => [anchor.noteId, anchor]));
     return (project.clefChanges ?? []).flatMap(change => {
-      const anchor = anchors.get(change.noteId);
-      return anchor && ['treble', 'bass'].includes(change.clef) ? [{ ...anchor, clef: change.clef }] : [];
+      const target = anchors ? anchors.get(change.noteId) : anchor(project, change.noteId);
+      return target && ['treble', 'bass'].includes(change.clef) ? [{ ...target, clef: change.clef }] : [];
     }).sort((a, b) => MusicalTime.compareNumbers(a.position, b.position));
   }
   export function at(project: ScoreProject, staff: PianoStaffName, position: number): Clef {

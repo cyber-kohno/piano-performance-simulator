@@ -1,5 +1,6 @@
 import ScoreTempo from './score-tempo.ts';
 import MusicalTime from '../theory/musical-time.ts';
+import ScoreTimeline from './score-timeline.ts';
 import type { DynamicLevel, ScoreProject } from './types.ts';
 
 namespace ScoreDynamics {
@@ -21,9 +22,9 @@ namespace ScoreDynamics {
   }
   export function changes(project: ScoreProject) {
     if (!project.dynamicChanges?.length) return [];
-    const byId = new Map(anchors(project).map(anchor => [anchor.noteId, anchor]));
+    const byId = ScoreTimeline.isPrepared(project.outline) ? undefined : new Map(anchors(project).map(anchor => [anchor.noteId, anchor]));
     return (project.dynamicChanges ?? []).flatMap(change => {
-      const anchor = byId.get(change.noteId);
+      const anchor = byId ? byId.get(change.noteId) : ScoreTempo.anchor(project, change.noteId);
       return anchor && isLevel(change.level) && isVelocity(change.velocity) ? [{ ...anchor, level: change.level, velocity: change.velocity }] : [];
     }).sort((a, b) => MusicalTime.compareNumbers(a.position, b.position));
   }

@@ -28,6 +28,7 @@
   import { type ScoreProject } from "./domain/score/types.ts";
   import ScoreFingerings, { type FingeringRules } from './domain/score/score-fingerings.ts';
   import FingeringInput from './state/fingering-input.ts';
+  import ScoreTrill from './domain/score/score-trill.ts';
   import { createKeyHold } from './state/key-hold.svelte';
   import {createTimelineCursor,getSelectedTimelineNotes} from './state/timeline-cursor.ts';
   import {createOutlineCursor} from './state/outline-cursor.ts';
@@ -113,7 +114,8 @@
   onDestroy(() => { playback?.dispose(); notePreview?.dispose(); });
 
   const initialProject = ScoreProjectFactory.create();
-  let project = $state<ScoreProject>(initialProject);
+  // Editor actions replace immutable snapshots; nested data needs no deep proxy.
+  let project = $state.raw<ScoreProject>(initialProject);
   $effect.pre(() => { ScoreTimeline.prepare(project.outline); });
   const playbackTimelineIndex = $derived(ScoreTimeline.index(project.outline));
   $effect(() => {
@@ -142,7 +144,8 @@
   let noteSettings=$state<NoteSettingsState|null>(null);
   let passageClipboard = $state<ScorePassageData | null>(null);
   let sectionTextInput = $state<({ blockId: string; anchor: HTMLElement } & FloatingTextState) | null>(null);
-  let fingeringTextInput = $state<({ noteId: string; graceNoteId?: string; pitchIndex: number; anchor: HTMLElement; rules: FingeringRules } & FloatingTextState) | null>(null);
+  let fingeringTextInput = $state<({ noteId: string; graceNoteId?: string; pitchIndex: number; anchor: HTMLElement; rules: FingeringRules;
+    trill?: { id: string; attackCount: number } } & FloatingTextState) | null>(null);
   // Every UI mutation entry uses this gate; MCP writes use their separate checkout path.
   function uiEditAllowed() { return !mcpCheckout; }
   function stopMcpEditing() {
@@ -155,7 +158,7 @@
     if (!input || !uiEditAllowed()) return;
     event.preventDefault();
     keyHold.reset();
-    const result = FloatingText.control(input, event, fingeringTextInput ? 3 : 32);
+    const result = FloatingText.control(input, event, fingeringTextInput ? fingeringTextInput.trill?.attackCount ?? 3 : 32);
     if (result.action === 'cancel') { fingeringTextInput = null; sectionTextInput = null; }
     else if (result.action === 'commit') {
       const value = input.value.trim();
@@ -173,6 +176,7 @@
     if (timelineCursor.focusedGraceId && !grace) return false;
     const pitch = (grace?.pitches ?? focused?.note.pitches)?.[timelineCursor.focusedPitchIndex];
     if (!focused || !pitch) return false;
+    const trill = grace ? undefined : ScoreTrill.forNote(project, focused.note.id);
     const target = `${grace?.id ?? focused.note.id}:${timelineCursor.focusedPitchIndex}`;
     const anchor = Array.from(document.querySelectorAll<HTMLElement>('[data-fingering-pitch]'))
       .find(element => element.dataset.fingeringPitch === target);
@@ -183,13 +187,26 @@
       pitchIndex: timelineCursor.focusedPitchIndex,
       anchor,
       rules: ScoreFingerings.rules(focused.note, timelineCursor.focusedPitchIndex, grace?.id),
-      ...FloatingText.create(pitch.fingering === undefined ? '' : `${pitch.fingering}${pitch.substitutionFingering === undefined ? '' : `-${pitch.substitutionFingering}`}`),
+      ...(trill ? {trill:{id:trill.id,attackCount:trill.settings.attackCount}} : {}),
+      ...FloatingText.create(trill ? trill.settings.fingerings?.join('') ?? ''
+        : pitch.fingering === undefined ? '' : `${pitch.fingering}${pitch.substitutionFingering === undefined ? '' : `-${pitch.substitutionFingering}`}`),
     };
     keyHold.reset();
     return true;
   }
   function commitFingeringText(value: string) {
     if (!uiEditAllowed() || !fingeringTextInput) return;
+    if (fingeringTextInput.trill) {
+      const current = ScoreTrill.forNote(project, fingeringTextInput.noteId);
+      if (current?.id !== fingeringTextInput.trill.id || current.settings.attackCount !== fingeringTextInput.trill.attackCount) return;
+      const fingers = FingeringInput.parseTrill(value, current.settings.attackCount);
+      if (fingers === undefined) return;
+      const previousProject = project;
+      project = NoteEditor.setTrillFingerings(project, fingeringTextInput.noteId, fingers ?? undefined);
+      fingeringTextInput = null;
+      recordProjectChange(previousProject);
+      return;
+    }
     const parsed = FingeringInput.parse(value, fingeringTextInput.rules);
     if (!parsed) return;
     const previousProject = project;
@@ -797,8 +814,11 @@
     onCancel={() => sectionTextInput = null} />
 {/if}
 {#if !mcpCheckout && fingeringTextInput}
-  <FloatingTextInput anchor={fingeringTextInput.anchor} draft={fingeringTextInput} label="Piano fingering"
-    accept={(value) => fingeringTextInput !== null && FingeringInput.parse(value, fingeringTextInput.rules) !== undefined}
+  <FloatingTextInput anchor={fingeringTextInput.anchor} draft={fingeringTextInput}
+    label={fingeringTextInput.trill ? `Trill fingering (${fingeringTextInput.trill.attackCount} digits, 1–5; empty clears)` : 'Piano fingering'}
+    accept={(value) => fingeringTextInput !== null && (fingeringTextInput.trill
+      ? FingeringInput.parseTrill(value, fingeringTextInput.trill.attackCount) !== undefined
+      : FingeringInput.parse(value, fingeringTextInput.rules) !== undefined)}
     onCancel={() => fingeringTextInput = null} />
 {/if}
 {#if !mcpCheckout && noteSettings}

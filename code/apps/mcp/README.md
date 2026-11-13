@@ -56,6 +56,8 @@ finish_checkout後に再取得し、新しいチェックアウトで追加・�
 
 操作契約はGUIの`score-edit-contract.ts`にまとめています。変更時にはgenerate-contract.mjsでRust向けスキーマを再生成します。テストで生成物の一致を確認します。
 
+トリルの指番号列は`set_trill`の`settings.fingerings`で指定します。例：7音なら`"attackCount": 7, "fingerings": [2, 3, 2, 3, 2, 3, 2]`です。配列は実際の発音順で、各値は1～5、長さはattackCountと一致させます。指替えは使えません。fingeringsを省略すると未設定になります。トリル設定時はタイ列の通常の指番号・指替えを解除します。トリルの本体音符にはset_fingeringや旧set_pitch_fingeringを使わず、set_trillで列を編集してください。
+
 ## 接続方式
 
 ```text

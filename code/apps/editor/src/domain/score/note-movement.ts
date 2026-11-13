@@ -17,7 +17,11 @@ namespace NoteMovement {
     const staff=target.staff;
     const requested=new Set(noteIds);
     if(requested.size>0&&!requested.has(target.noteId)) return undefined;
-    const selection=ScoreTimeline.notes(project.outline,target.staff,target.voiceIndex).filter(entry => requested.has(entry.note.id));
+    const selection=ScoreTimeline.isPrepared(project.outline) ? [...requested].flatMap(id => {
+      const entry=ScoreTimeline.note(project.outline,id,target.staff);
+      return entry?.voiceIndex===target.voiceIndex ? [entry] : [];
+    }).sort((a,b) => a.measureStartSixteenths+a.positionSixteenths-b.measureStartSixteenths-b.positionSixteenths)
+      : ScoreTimeline.notes(project.outline,target.staff,target.voiceIndex).filter(entry => requested.has(entry.note.id));
     if(requested.size>0&&selection.length!==requested.size) return undefined;
     const chain=selection.length>1? selection:ScoreTimeline.tieChain(project.outline,target.noteId,target.staff);
     if(selection.some(entry => entry.tuplet)) return undefined;
@@ -26,9 +30,12 @@ namespace NoteMovement {
     if(!NotationGrid.contains(shift)||shift===0) return undefined;
     const ids=new Set(chain.map(({ note }) => note.id));
     const plans: { measureId: string; position: number; onset: number; note: PianoNote }[]=[];
-    const others=ScoreTimeline.notes(project.outline,target.staff,target.voiceIndex).filter(({ note }) => !ids.has(note.id));
+    const moving=chain.map(entry => ({ start: MusicalTime.addNumbers(entry.measureStartSixteenths,entry.positionSixteenths),length: entry.lengthSixteenths }));
+    const start=MusicalTime.addNumbers(moving.reduce((start,note) => Math.min(start,note.start),Infinity),Math.min(shift,0));
+    const end=MusicalTime.addNumbers(moving.reduce((end,note) => Math.max(end,MusicalTime.addNumbers(note.start,note.length)),-Infinity),Math.max(shift,0));
+    const others=ScoreTimeline.notesInRange(project.outline,target.staff,target.voiceIndex,start,end).filter(({ note }) => !ids.has(note.id));
     if(NoteOrder.crosses(
-      chain.map(entry => ({ start: MusicalTime.addNumbers(entry.measureStartSixteenths,entry.positionSixteenths),length: entry.lengthSixteenths })),
+      moving,
       others.map(entry => ({ start: MusicalTime.addNumbers(entry.measureStartSixteenths,entry.positionSixteenths),length: entry.lengthSixteenths })),shift,
     )) return undefined;
     for(const entry of chain) {
@@ -46,8 +53,10 @@ namespace NoteMovement {
       plans.push({ measureId: location.measure.id,position,onset,note: entry.note });
     }
 
+    const measures=new Set([...chain.map(entry => entry.measure.id),...plans.map(plan => plan.measureId)]);
     const outline=project.outline.map((block) => {
       if(block.type!=='measure') return block;
+      if(!measures.has(block.id)) return block;
       const voice=block.data[staff].voices[target.voiceIndex];
       if(!voice) return block;
       const entries=ScoreVoice.locate(voice,block.data.length);
@@ -98,10 +107,11 @@ namespace NoteMovement {
         }
       };
     }) as ScoreProject['outline'];
+    if(ScoreTimeline.isPrepared(project.outline)) ScoreTimeline.prepare(outline);
     const selected=plans.find(({ note }) => note.id===target.noteId)!;
     if(ScoreNotes.collides(project.outline,outline,staff,ids)) return undefined;
     return {
-      project: { ...project,outline: ScoreTies.reconcile(outline) },
+      project: ScoreTies.reconcileNotes({ ...project,outline },staff,ids),
       position: selected.onset,
     };
   }

@@ -16,6 +16,7 @@ namespace NoteSpan {
       if(block.type!=='measure') return false;
       const offset=measureStart;
       measureStart+=block.data.length.cnt/block.data.length.unit*16;
+      if(MusicalTime.compareNumbers(offset,end)>=0||MusicalTime.compareNumbers(measureStart,start)<=0) return false;
       const voice=block.data[target.staff].voices[target.voiceIndex];
       return voice&&ScoreVoice.locate(voice,block.data.length).some((entry) => entry.element.kind==='tuplet'&&
         MusicalTime.compareNumbers(offset+entry.positionSixteenths,end)<0&&MusicalTime.compareNumbers(MusicalTime.addNumbers(offset+entry.positionSixteenths,entry.lengthSixteenths),start)>0);

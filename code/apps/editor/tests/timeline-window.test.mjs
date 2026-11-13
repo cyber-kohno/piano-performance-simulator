@@ -94,6 +94,7 @@ async function componentFixture(scrollEffects = false) {
         stop() { playbackActive = false; playbackPosition = null; },
         setPitch(pitch) { timelineCursor = { ...timelineCursor, pitch }; },
         get window() { return renderWindow; },
+        get header() { return timelineHeader; },
         get data() { return [visibleMeasures, visibleTiePaths, visibleSlurPaths, visiblePedalEvents,
           visiblePedalSpans, visibleOttavaEvents, visibleOttavaSpans]; }
       };
@@ -117,11 +118,12 @@ test('horizontal animation reuses display data; focus, playback and vertical scr
   class Viewport { scrollLeft = 0; scrollTop = 0; clientWidth = 960; clientHeight = 600; }
   const roll = new Viewport();
   view.attach(roll);
-  const initialWindow = view.window, initialData = view.data;
+  const initialWindow = view.window, initialData = view.data, initialHeader = view.header;
   for (let frame = 1; frame <= 15; frame++) {
     roll.scrollLeft = frame * 80;
     view.scroll();
     assert.equal(view.window, initialWindow);
+    assert.equal(view.header, initialHeader);
     view.data.forEach((data, i) => assert.equal(data, initialData[i]));
   }
   view.focus(16 * 40);
